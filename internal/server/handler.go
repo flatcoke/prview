@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -50,6 +49,7 @@ var upgrader = websocket.Upgrader{
 type srv struct {
 	cfg         Config
 	hiddenRepos map[string]bool
+	watchMgr    *watcher.Manager
 }
 
 // New creates and returns a configured http.Handler.
@@ -57,6 +57,7 @@ func New(cfg Config) http.Handler {
 	s := &srv{
 		cfg:         cfg,
 		hiddenRepos: make(map[string]bool),
+		watchMgr:    watcher.NewManager(),
 	}
 
 	mux := http.NewServeMux()
@@ -315,26 +316,18 @@ func (s *srv) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	// refreshCh is buffered so the watcher goroutine never blocks.
-	// Capacity 1 provides natural deduplication: at most one refresh queued.
-	refreshCh := make(chan struct{}, 1)
-
-	stopWatch, err := watcher.Watch(ctx, watchDir, wsDebounceDuration, func() {
-		select {
-		case refreshCh <- struct{}{}:
-		default: // a refresh is already pending — drop the duplicate
-		}
-	})
+	// Subscribe to the shared watcher for this directory. Multiple WS
+	// connections to the same repo share one fsnotify watcher, preventing
+	// file-descriptor exhaustion when browsers rapidly reconnect.
+	refreshCh, unsub, err := s.watchMgr.Subscribe(watchDir, wsDebounceDuration)
 	if err != nil {
 		log.Printf("ws watcher: %v", err)
 		_ = conn.WriteJSON(map[string]string{"type": "error", "message": "watcher failed"})
 		conn.Close()
 		return
 	}
-	defer stopWatch()
+	defer unsub()
+	defer conn.Close()
 
 	// readErr receives an error the moment the client disconnects or sends
 	// invalid data. gorilla/websocket allows one concurrent reader and one
@@ -350,8 +343,6 @@ func (s *srv) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	defer conn.Close()
-
 	// Main loop: ONLY this goroutine writes to conn.
 	for {
 		select {
@@ -361,7 +352,7 @@ func (s *srv) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-readErr:
 			return
-		case <-ctx.Done():
+		case <-r.Context().Done():
 			return
 		}
 	}
