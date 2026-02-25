@@ -125,6 +125,8 @@ header {
 }
 
 .branch-icon {
+  width: 16px;
+  height: 16px;
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -186,7 +188,20 @@ header {
 }
 .mode-btn:hover:not(.active) { color: var(--text-secondary); }
 
-/* ── Worktree dropdown ── */
+/* ── Worktree control ── */
+
+.worktree-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.worktree-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
 
 #wt-select {
   appearance: none;

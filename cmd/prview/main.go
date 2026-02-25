@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"os/signal"
 	"runtime"
 	"syscall"
@@ -36,6 +37,17 @@ func main() {
 	}
 
 	workDir, _ := os.Getwd()
+	// If a positional argument is given and it's a directory, use it as workDir.
+	args := flag.Args()
+	if len(args) > 0 {
+		if info, err := os.Stat(args[0]); err == nil && info.IsDir() {
+			absPath, err := filepath.Abs(args[0])
+			if err == nil {
+				workDir = absPath
+			}
+			args = args[1:]
+		}
+	}
 
 	// Detect mode: single repo vs workspace
 	isWorkspace := false
@@ -55,7 +67,7 @@ func main() {
 		Port:      *port,
 		Staged:    *staged,
 		All:       *all,
-		RefArgs:   flag.Args(),
+		RefArgs:   args,
 		WorkDir:   workDir,
 		Workspace: isWorkspace,
 	}

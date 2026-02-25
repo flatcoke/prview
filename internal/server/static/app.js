@@ -278,13 +278,12 @@
       sel.appendChild(opt);
     });
     sel.onchange = () => selectWorktree(repoName, sel.value);
-    sel.style.display = "";
+    document.getElementById("worktree-control").style.display = "";
   }
 
   function hideWorktreeSelect() {
-    const sel = document.getElementById("wt-select");
-    sel.style.display = "none";
-    sel.innerHTML = "";
+    document.getElementById("worktree-control").style.display = "none";
+    document.getElementById("wt-select").innerHTML = "";
   }
 
   // ── Workspace / repo list ──
