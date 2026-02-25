@@ -8,13 +8,13 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header id="header">
+  <header>
     <div class="header-left">
       <button id="btn-back" class="back-btn" style="display:none;" title="Back to repos">←</button>
       <h1>prview</h1>
       <span id="stats" class="stats"></span>
     </div>
-    <div class="header-right">
+    <div class="header-right" style="display:none;">
       <button id="btn-unified" class="view-btn" data-view="line-by-line">Unified</button>
       <button id="btn-split" class="view-btn active" data-view="side-by-side">Split</button>
     </div>
@@ -24,13 +24,9 @@
       <div class="sidebar-header">Files</div>
       <ul id="file-list"></ul>
     </aside>
-    <main id="diff-container" style="display:none;">
-      <div id="empty-state">
-        <p>No changes detected.</p>
-      </div>
-    </main>
+    <main id="diff-container" style="display:none;"></main>
     <div id="repo-list-container" style="display:none;"></div>
-    <div id="loading" style="display:flex; flex:1; align-items:center; justify-content:center; color:#8b949e;">Loading...</div>
+    <div id="loading" class="page-loading">Loading…</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html.min.js"></script>
   <script src="/app.js"></script>

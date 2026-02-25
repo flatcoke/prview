@@ -30,7 +30,7 @@ type Config struct {
 func New(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 
-	// Serve static files with SPA fallback
+	// Serve static files with SPA fallback for all non-API routes.
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		log.Fatalf("failed to create sub filesystem: %v", err)
@@ -38,13 +38,12 @@ func New(cfg Config) http.Handler {
 	staticHandler := http.FileServer(http.FS(sub))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		// Known static files
 		if path == "/" || path == "/index.html" ||
 			path == "/app.js" || path == "/style.css" {
 			staticHandler.ServeHTTP(w, r)
 			return
 		}
-		// SPA fallback for /repos/* and any other routes
+		// SPA fallback for /repos/* and any other non-file routes.
 		if strings.HasPrefix(path, "/repos/") || !strings.Contains(path, ".") {
 			r.URL.Path = "/"
 			staticHandler.ServeHTTP(w, r)
@@ -53,7 +52,7 @@ func New(cfg Config) http.Handler {
 		staticHandler.ServeHTTP(w, r)
 	})
 
-	// Workspace mode: list repos
+	// Workspace mode: list repos.
 	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if !cfg.Workspace {
@@ -68,22 +67,20 @@ func New(cfg Config) http.Handler {
 		json.NewEncoder(w).Encode(map[string]interface{}{"workspace": true, "repos": repos})
 	})
 
-	// API endpoint
+	// Diff API endpoint.
 	mux.HandleFunc("/api/diff", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		repoName := r.URL.Query().Get("repo")
 
-		// If workspace mode and a repo is specified, diff within that repo
 		if cfg.Workspace && repoName != "" {
-			// Sanitize: prevent directory traversal
-			if strings.Contains(repoName, "/") || strings.Contains(repoName, "..") {
+			repoDir, ok := safeRepoPath(cfg.WorkDir, repoName)
+			if !ok {
 				http.Error(w, `{"error": "invalid repo name"}`, http.StatusBadRequest)
 				return
 			}
-			repoDir := filepath.Join(cfg.WorkDir, repoName)
 			if !git.IsGitRepo(repoDir) {
-				http.Error(w, `{"error": "not a git repository"}`, http.StatusBadRequest)
+				http.Error(w, `{"error": "not a git repository"}`, http.StatusNotFound)
 				return
 			}
 			args := buildDiffArgs(cfg, r)
@@ -96,7 +93,7 @@ func New(cfg Config) http.Handler {
 			return
 		}
 
-		// Single repo mode
+		// Single repo mode.
 		args := buildDiffArgs(cfg, r)
 		result, err := git.Diff(args)
 		if err != nil {
@@ -107,6 +104,24 @@ func New(cfg Config) http.Handler {
 	})
 
 	return mux
+}
+
+// safeRepoPath validates a repo name and returns the absolute path within workDir.
+// Repo names may contain "/" for nested repos (e.g. "meta/web") but must not
+// contain ".." components or empty segments to prevent directory traversal.
+func safeRepoPath(workDir, repoName string) (string, bool) {
+	for _, part := range strings.Split(repoName, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	repoDir := filepath.Join(workDir, filepath.FromSlash(repoName))
+	// Confirm the resolved path is still inside workDir.
+	base := filepath.Clean(workDir) + string(filepath.Separator)
+	if !strings.HasPrefix(filepath.Clean(repoDir)+string(filepath.Separator), base) {
+		return "", false
+	}
+	return repoDir, true
 }
 
 func buildDiffArgs(cfg Config, r *http.Request) []string {

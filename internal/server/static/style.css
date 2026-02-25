@@ -27,7 +27,8 @@ body {
   height: 100vh;
 }
 
-/* Header */
+/* ── Header ── */
+
 header {
   display: flex;
   align-items: center;
@@ -79,7 +80,6 @@ header {
 .view-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
 .view-btn:hover:not(.active) { background: var(--border); }
 
-/* Back button */
 .back-btn {
   background: none;
   border: 1px solid var(--border);
@@ -91,14 +91,16 @@ header {
 }
 .back-btn:hover { background: var(--bg-tertiary); }
 
-/* Layout */
+/* ── Layout ── */
+
 #container {
   display: flex;
   margin-top: var(--header-height);
   height: calc(100vh - var(--header-height));
 }
 
-/* Sidebar */
+/* ── Sidebar ── */
+
 #sidebar {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
@@ -155,28 +157,46 @@ header {
   flex-shrink: 0;
   font-weight: 600;
 }
-.status-added { background: rgba(63, 185, 80, 0.2); color: var(--green); }
-.status-deleted { background: rgba(248, 81, 73, 0.2); color: var(--red); }
-.status-renamed { background: rgba(88, 166, 255, 0.2); color: var(--blue); }
+.status-added    { background: rgba(63, 185, 80, 0.2);  color: var(--green); }
+.status-deleted  { background: rgba(248, 81, 73, 0.2);  color: var(--red); }
+.status-renamed  { background: rgba(88, 166, 255, 0.2); color: var(--blue); }
 .status-modified { background: rgba(210, 153, 34, 0.2); color: #d29922; }
 
-/* Main diff area */
+/* ── Diff area ── */
+
 #diff-container {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  /* No top padding so the first sticky file header sits flush at the top. */
+  padding: 0 16px 16px;
 }
 
-#empty-state {
+/* Loading / empty / error states rendered inside #diff-container */
+.diff-loading,
+.diff-empty,
+.diff-error {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
+  min-height: 200px;
+  font-size: 15px;
   color: var(--text-muted);
-  font-size: 16px;
+}
+.diff-error { color: var(--red); }
+
+/* Full-page loading state (before workspace/repo is known) */
+.page-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--text-muted);
 }
 
-/* File collapse button */
+/* ── File collapse button ── */
+
 .file-collapse-btn {
   background: none;
   border: none;
@@ -189,9 +209,9 @@ header {
 .file-collapse-btn.collapsed { transform: rotate(-90deg); }
 
 /* ── Repo list table ── */
+
 #repo-list-container {
   flex: 1;
-  display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 32px;
@@ -223,35 +243,44 @@ header {
 }
 .repo-table tbody tr:hover { background: var(--bg-secondary); }
 
-.repo-table td {
-  padding: 10px 12px;
-}
+.repo-table td { padding: 10px 12px; }
 
-.repo-table .repo-indicator {
-  width: 24px;
-  text-align: center;
-}
+.repo-table .repo-indicator { width: 24px; text-align: center; }
 .dot-dirty { color: var(--green); }
 .dot-clean { color: var(--text-muted); }
 
-.repo-table .repo-name {
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.repo-table .repo-branch {
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.repo-table .repo-status {
-  font-size: 13px;
-  color: var(--text-muted);
-}
+.repo-table .repo-name   { font-weight: 500; color: var(--text-primary); }
+.repo-table .repo-branch { color: var(--text-muted); font-size: 13px; }
+.repo-table .repo-status { font-size: 13px; color: var(--text-muted); }
 .repo-table tr.repo-dirty .repo-status { color: var(--green); }
 
-/* Scrollbar */
+/* ── Scrollbar ── */
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+/* ── diff2html overrides ── */
+
+/* Sticky file headers — must use !important to override diff2html specificity. */
+.d2h-file-header {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 10 !important;
+}
+
+/* Disable sticky line numbers — scroll with content naturally. */
+.d2h-code-linenumber,
+.d2h-code-side-linenumber {
+  position: static !important;
+}
+
+/* Remove top margin on the first file wrapper to prevent a gap above the
+   first sticky header when the diff area is scrolled to the top. */
+.d2h-wrapper {
+  margin-top: 0 !important;
+}
+.d2h-file-wrapper:first-child {
+  margin-top: 0 !important;
+}

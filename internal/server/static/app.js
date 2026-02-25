@@ -7,15 +7,12 @@
   let currentRepo = null;
   let reposCache = null;
 
+  // ── HTTP ──
+
   async function fetchJSON(url) {
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.json();
-    } catch (err) {
-      console.error("Fetch error:", err);
-      return null;
-    }
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
   }
 
   // ── Layout switching ──
@@ -39,18 +36,16 @@
     document.querySelector(".header-right").style.display = "";
   }
 
-  // ── Workspace mode ──
+  // ── Workspace / repo list ──
 
-  async function checkWorkspace() {
+  async function loadWorkspace() {
     const data = await fetchJSON("/api/repos");
-    if (!data) return false;
-    if (data.workspace && data.repos && data.repos.length > 0) {
+    if (data.workspace && Array.isArray(data.repos) && data.repos.length > 0) {
       isWorkspace = true;
       reposCache = data.repos;
-      renderRepoListPage(data.repos, false);
-      return true;
+      return data.repos;
     }
-    return false;
+    return null;
   }
 
   function renderRepoListPage(repos, pushHistory) {
@@ -58,16 +53,14 @@
     showRepoList();
 
     const container = document.getElementById("repo-list-container");
-    container.innerHTML = "";
-
     const stats = document.getElementById("stats");
+
     const dirtyCount = repos.filter((r) => r.dirty).length;
     stats.innerHTML = `${repos.length} repositories`;
     if (dirtyCount > 0) {
       stats.innerHTML += ` &nbsp;<span class="add">${dirtyCount} with changes</span>`;
     }
 
-    // Sort: dirty repos first
     const sorted = [...repos].sort((a, b) => {
       if (a.dirty && !b.dirty) return -1;
       if (!a.dirty && b.dirty) return 1;
@@ -92,8 +85,12 @@
       tr.className = repo.dirty ? "repo-dirty" : "";
       tr.onclick = () => selectRepo(repo.name);
 
+      const indicator = repo.dirty
+        ? '<span class="dot-dirty">●</span>'
+        : '<span class="dot-clean">○</span>';
+
       tr.innerHTML =
-        `<td class="repo-indicator">${repo.dirty ? '<span class="dot-dirty">●</span>' : '<span class="dot-clean">○</span>'}</td>` +
+        `<td class="repo-indicator">${indicator}</td>` +
         `<td class="repo-name">${repo.name}</td>` +
         `<td class="repo-branch">${repo.branch || ""}</td>` +
         `<td class="repo-status">${repo.dirty ? "Changes" : "Clean"}</td>`;
@@ -101,34 +98,51 @@
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
+
+    container.innerHTML = "";
     container.appendChild(table);
   }
+
+  // ── Repo diff ──
 
   async function selectRepo(repoName) {
     currentRepo = repoName;
     history.pushState({ repo: repoName }, "", `/repos/${repoName}`);
+
+    // Show diff view with loading state immediately — clears any previous diff.
     showDiffView();
+    setDiffLoading(repoName);
 
-    const stats = document.getElementById("stats");
-    stats.innerHTML = `Loading ${repoName}...`;
-
-    const url = `/api/diff?repo=${encodeURIComponent(repoName)}`;
-    diffData = await fetchJSON(url);
-
-    if (diffData) {
+    try {
+      const url = `/api/diff?repo=${encodeURIComponent(repoName)}`;
+      diffData = await fetchJSON(url);
       renderStats(diffData);
       renderFileList(diffData);
       renderDiff(diffData);
+    } catch (err) {
+      renderDiffError(err.message);
     }
   }
 
-  // ── Diff view ──
+  function setDiffLoading(repoName) {
+    const label = repoName ? `Loading ${repoName}…` : "Loading…";
+    document.getElementById("stats").innerHTML = label;
+    document.getElementById("file-list").innerHTML = "";
+    document.getElementById("diff-container").innerHTML =
+      '<div class="diff-loading">Loading diff…</div>';
+  }
+
+  function renderDiffError(message) {
+    document.getElementById("diff-container").innerHTML =
+      `<div class="diff-error">Error: ${message}</div>`;
+  }
+
+  // ── Stats / file list / diff rendering ──
 
   function renderStats(data) {
-    const el = document.getElementById("stats");
     const nFiles = data.files ? data.files.length : 0;
     const prefix = currentRepo ? `${currentRepo} — ` : "";
-    el.innerHTML =
+    document.getElementById("stats").innerHTML =
       prefix +
       `${nFiles} file${nFiles !== 1 ? "s" : ""} changed &nbsp;` +
       `<span class="add">+${data.additions || 0}</span> &nbsp;` +
@@ -151,11 +165,9 @@
             ? file.oldName
             : file.newName;
 
-      const badgeClass = `status-${file.status}`;
       const badgeText = file.status.charAt(0).toUpperCase();
-
       li.innerHTML =
-        `<span class="status-badge ${badgeClass}">${badgeText}</span>` +
+        `<span class="status-badge status-${file.status}">${badgeText}</span>` +
         `<span class="filename" title="${name}">${name}</span>` +
         `<span class="file-stats">` +
         (file.additions ? `<span class="add">+${file.additions}</span> ` : "") +
@@ -168,22 +180,11 @@
 
   function renderDiff(data) {
     const container = document.getElementById("diff-container");
-    const empty = document.getElementById("empty-state");
 
     if (!data.rawDiff || data.rawDiff.trim() === "") {
-      container.innerHTML = "";
-      empty.querySelector("p").textContent = "No changes detected.";
-      container.appendChild(empty);
-      empty.style.display = "flex";
+      container.innerHTML = '<div class="diff-empty">No changes detected.</div>';
       return;
     }
-
-    empty.style.display = "none";
-
-    const targetEl = document.createElement("div");
-    targetEl.id = "diff-target";
-    container.innerHTML = "";
-    container.appendChild(targetEl);
 
     const html = Diff2Html.html(data.rawDiff, {
       drawFileList: false,
@@ -191,10 +192,10 @@
       outputFormat: currentView,
       colorScheme: "dark",
     });
-    targetEl.innerHTML = html;
+    container.innerHTML = html;
 
-    const headers = container.querySelectorAll(".d2h-file-header");
-    headers.forEach((header, idx) => {
+    container.querySelectorAll(".d2h-file-header").forEach((header, idx) => {
+      header.id = `file-header-${idx}`;
       const btn = document.createElement("button");
       btn.className = "file-collapse-btn";
       btn.innerHTML = "▼";
@@ -203,13 +204,12 @@
         toggleFile(btn);
       };
       header.prepend(btn);
-      header.id = `file-header-${idx}`;
     });
   }
 
   function toggleFile(btn) {
     const wrapper = btn.closest(".d2h-file-wrapper");
-    const diff = wrapper ? wrapper.querySelector(".d2h-file-diff") : null;
+    const diff = wrapper && wrapper.querySelector(".d2h-file-diff");
     if (!diff) return;
     const collapsed = diff.style.display === "none";
     diff.style.display = collapsed ? "" : "none";
@@ -218,10 +218,10 @@
 
   function scrollToFile(idx) {
     const header = document.getElementById(`file-header-${idx}`);
-    if (header) {
-      header.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    if (header) header.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  // ── View toggle ──
 
   function setupViewToggle() {
     document.getElementById("btn-unified").onclick = () => {
@@ -238,8 +238,11 @@
     };
   }
 
+  // ── Init ──
+
   async function init() {
     setupViewToggle();
+
     document.getElementById("btn-back").onclick = () => {
       if (reposCache) renderRepoListPage(reposCache);
     };
@@ -254,25 +257,37 @@
 
     const loading = document.getElementById("loading");
 
-    const ws = await checkWorkspace();
-    if (loading) loading.style.display = "none";
-    if (ws) {
-      // Check URL for direct repo access: /repoName
+    let repos = null;
+    try {
+      repos = await loadWorkspace();
+    } catch (_) {
+      // API unavailable or not workspace — fall through to single repo mode.
+    }
+
+    loading.style.display = "none";
+
+    if (repos) {
+      // Workspace mode: honour direct URL like /repos/parent/child.
       const match = window.location.pathname.match(/^\/repos\/(.+)$/);
-      const path = match ? match[1] : "";
-      if (path && reposCache.some((r) => r.name === path)) {
-        await selectRepo(path);
+      const repoName = match ? match[1] : "";
+      if (repoName && repos.some((r) => r.name === repoName)) {
+        await selectRepo(repoName);
+      } else {
+        renderRepoListPage(repos, false);
       }
       return;
     }
 
-    if (loading) loading.style.display = "none";
+    // Single repo mode.
     showDiffView();
-    diffData = await fetchJSON("/api/diff");
-    if (diffData) {
+    setDiffLoading("");
+    try {
+      diffData = await fetchJSON("/api/diff");
       renderStats(diffData);
       renderFileList(diffData);
       renderDiff(diffData);
+    } catch (err) {
+      renderDiffError(err.message);
     }
   }
 
