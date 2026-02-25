@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Protected branch names that cannot be deleted.
@@ -86,13 +87,31 @@ func IsGitRepo(dir string) bool {
 // DiscoverRepos finds git repositories in subdirectories of dir.
 // It recurses into non-git directories to find nested repos (e.g. "group/repo"),
 // but stops recursing once a .git entry is found (submodules are not listed separately).
+// Metadata (branch, dirty, lastCommit) is fetched in parallel via goroutines.
 func DiscoverRepos(dir string) ([]Repo, error) {
-	var repos []Repo
-	discoverRecursive(dir, dir, &repos)
+	// Phase 1: collect repo paths (fast, no git commands).
+	var paths []Repo
+	discoverPaths(dir, dir, &paths)
+
+	// Phase 2: fill metadata in parallel.
+	var wg sync.WaitGroup
+	repos := make([]Repo, len(paths))
+	for i, r := range paths {
+		repos[i] = r
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			d := repos[idx].Path
+			repos[idx].Branch = gitBranch(d)
+			repos[idx].Dirty = gitDirty(d)
+			repos[idx].LastCommit = gitLastCommit(d)
+		}(i)
+	}
+	wg.Wait()
 	return repos, nil
 }
 
-func discoverRecursive(baseDir, currentDir string, repos *[]Repo) {
+func discoverPaths(baseDir, currentDir string, repos *[]Repo) {
 	entries, err := os.ReadDir(currentDir)
 	if err != nil {
 		return
@@ -111,15 +130,12 @@ func discoverRecursive(baseDir, currentDir string, repos *[]Repo) {
 				continue
 			}
 			*repos = append(*repos, Repo{
-				Name:       filepath.ToSlash(relPath),
-				Path:       subdir,
-				Branch:     gitBranch(subdir),
-				Dirty:      gitDirty(subdir),
-				LastCommit: gitLastCommit(subdir),
+				Name: filepath.ToSlash(relPath),
+				Path: subdir,
 			})
 			// Stop here — don't recurse into git repo subdirectories.
 		} else {
-			discoverRecursive(baseDir, subdir, repos)
+			discoverPaths(baseDir, subdir, repos)
 		}
 	}
 }
