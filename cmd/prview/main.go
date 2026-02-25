@@ -16,6 +16,11 @@ import (
 	"github.com/flatcoke/prview/internal/server"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+)
+
 func main() {
 	port := flag.Int("port", 8888, "Port to listen on")
 	staged := flag.Bool("staged", false, "Show staged changes")
