@@ -47,14 +47,14 @@
     if (data.workspace && data.repos && data.repos.length > 0) {
       isWorkspace = true;
       reposCache = data.repos;
-      renderRepoListPage(data.repos);
+      renderRepoListPage(data.repos, false);
       return true;
     }
     return false;
   }
 
-  function renderRepoListPage(repos) {
-    history.pushState({}, "", "/");
+  function renderRepoListPage(repos, pushHistory) {
+    if (pushHistory !== false) history.pushState({}, "", "/");
     showRepoList();
 
     const container = document.getElementById("repo-list-container");
@@ -248,12 +248,14 @@
       if (e.state && e.state.repo) {
         selectRepo(e.state.repo);
       } else if (reposCache) {
-        showRepoList();
-        currentRepo = null;
+        renderRepoListPage(reposCache, false);
       }
     });
 
+    const loading = document.getElementById("loading");
+
     const ws = await checkWorkspace();
+    if (loading) loading.style.display = "none";
     if (ws) {
       // Check URL for direct repo access: /repoName
       const match = window.location.pathname.match(/^\/repos\/(.+)$/);
@@ -264,6 +266,7 @@
       return;
     }
 
+    if (loading) loading.style.display = "none";
     showDiffView();
     diffData = await fetchJSON("/api/diff");
     if (diffData) {
