@@ -61,8 +61,12 @@ func New(cfg Config) http.Handler {
 		staticHandler.ServeHTTP(w, r)
 	})
 
-	// Branches API endpoint.
+	// Branches API endpoint (GET: list, DELETE: remove).
 	mux.HandleFunc("/api/branches", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			handleDeleteBranch(w, r, cfg)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		repoName := r.URL.Query().Get("repo")
 		if repoName != "" {
@@ -98,8 +102,12 @@ func New(cfg Config) http.Handler {
 		})
 	})
 
-	// Worktrees API endpoint.
+	// Worktrees API endpoint (GET: list, DELETE: remove).
 	mux.HandleFunc("/api/worktrees", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			handleDeleteWorktree(w, r, cfg)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		repoName := r.URL.Query().Get("repo")
 		if repoName == "" {
@@ -123,6 +131,50 @@ func New(cfg Config) http.Handler {
 		json.NewEncoder(w).Encode(map[string]interface{}{"worktrees": worktrees})
 	})
 
+	// Clear repo (git checkout . + git clean -fd).
+	mux.HandleFunc("/api/clear", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		repoName := r.URL.Query().Get("repo")
+		if repoName == "" {
+			http.Error(w, `{"error":"repo parameter required"}`, http.StatusBadRequest)
+			return
+		}
+		repoDir, ok := safeRepoPath(cfg.WorkDir, repoName)
+		if !ok {
+			http.Error(w, `{"error":"invalid repo name"}`, http.StatusBadRequest)
+			return
+		}
+		if err := git.ClearRepo(repoDir); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"ok": "cleared"})
+	})
+
+	// Hidden repos management.
+	hiddenRepos := make(map[string]bool)
+	mux.HandleFunc("/api/hide", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		repoName := r.URL.Query().Get("repo")
+		if repoName == "" {
+			http.Error(w, `{"error":"repo parameter required"}`, http.StatusBadRequest)
+			return
+		}
+		if r.Method == http.MethodPost {
+			hiddenRepos[repoName] = true
+			json.NewEncoder(w).Encode(map[string]string{"ok": "hidden"})
+		} else if r.Method == http.MethodDelete {
+			delete(hiddenRepos, repoName)
+			json.NewEncoder(w).Encode(map[string]string{"ok": "unhidden"})
+		} else {
+			http.Error(w, `{"error":"POST or DELETE required"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
 	// Workspace mode: list repos.
 	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -135,7 +187,22 @@ func New(cfg Config) http.Handler {
 			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"workspace": true, "repos": repos})
+		// Filter out hidden repos unless ?all=true.
+		showAll := r.URL.Query().Get("all") == "true"
+		if !showAll && len(hiddenRepos) > 0 {
+			filtered := make([]git.Repo, 0, len(repos))
+			for _, repo := range repos {
+				if !hiddenRepos[repo.Name] {
+					filtered = append(filtered, repo)
+				}
+			}
+			repos = filtered
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"workspace": true,
+			"repos":     repos,
+			"hidden":    len(hiddenRepos),
+		})
 	})
 
 	// Diff API endpoint.
@@ -317,6 +384,53 @@ func resolveWatchDir(cfg Config, r *http.Request) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// handleDeleteBranch handles DELETE /api/branches?repo=X&branch=Y[&force=true].
+func handleDeleteBranch(w http.ResponseWriter, r *http.Request, cfg Config) {
+	w.Header().Set("Content-Type", "application/json")
+	repoName := r.URL.Query().Get("repo")
+	branchName := r.URL.Query().Get("branch")
+	if branchName == "" {
+		http.Error(w, `{"error":"branch parameter required"}`, http.StatusBadRequest)
+		return
+	}
+	var repoDir string
+	if repoName != "" {
+		var ok bool
+		repoDir, ok = safeRepoPath(cfg.WorkDir, repoName)
+		if !ok {
+			http.Error(w, `{"error":"invalid repo name"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	force := r.URL.Query().Get("force") == "true"
+	if err := git.DeleteBranch(repoDir, branchName, force); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"ok": "deleted"})
+}
+
+// handleDeleteWorktree handles DELETE /api/worktrees?repo=X&worktree=Y.
+func handleDeleteWorktree(w http.ResponseWriter, r *http.Request, cfg Config) {
+	w.Header().Set("Content-Type", "application/json")
+	repoName := r.URL.Query().Get("repo")
+	worktreeName := r.URL.Query().Get("worktree")
+	if repoName == "" || worktreeName == "" {
+		http.Error(w, `{"error":"repo and worktree parameters required"}`, http.StatusBadRequest)
+		return
+	}
+	repoDir, ok := safeRepoPath(cfg.WorkDir, repoName)
+	if !ok {
+		http.Error(w, `{"error":"invalid repo name"}`, http.StatusBadRequest)
+		return
+	}
+	if err := git.DeleteWorktree(repoDir, worktreeName); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"ok": "removed"})
 }
 
 // buildDiffArgs builds git diff arguments based on config, request params, and repo dir.

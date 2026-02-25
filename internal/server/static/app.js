@@ -210,9 +210,93 @@
     sel.value = selectedBranch || "";
     sel.onchange = () => {
       currentBase = sel.value;
+      updateDeleteBranchVisibility();
       updateURL(false);
       fetchAndRenderDiff();
     };
+  }
+
+  // ── Delete handlers ──
+
+  function updateDeleteBranchVisibility() {
+    const btn = document.getElementById("btn-delete-branch");
+    if (!btn) return;
+    // Hide if selected base is the current branch (can't delete checked-out branch)
+    // or if it's main/master
+    const sel = document.getElementById("base-select");
+    const selected = sel ? sel.value : "";
+    const isProtected = selected === "main" || selected === "master";
+    btn.disabled = isProtected;
+  }
+
+  function updateDeleteWorktreeVisibility() {
+    const btn = document.getElementById("btn-delete-worktree");
+    if (!btn) return;
+    const sel = document.getElementById("wt-select");
+    const options = sel ? sel.options : [];
+    btn.disabled = options.length <= 1 || sel.selectedIndex === 0;
+  }
+
+  async function deleteBranch() {
+    const sel = document.getElementById("base-select");
+    const branch = sel ? sel.value : "";
+    if (!branch) return;
+    if (!confirm(`Delete branch "${branch}"? This cannot be undone.`)) return;
+
+    try {
+      const params = new URLSearchParams({ branch });
+      if (currentRepo) params.set("repo", currentRepo);
+      const resp = await fetch("/api/branches?" + params.toString(), { method: "DELETE" });
+      if (!resp.ok) {
+        const data = await resp.json();
+        alert("Failed: " + (data.error || resp.statusText));
+        return;
+      }
+      // Refresh branches — reset to default if deleted was selected.
+      const branchData = await loadBranches(currentRepo || null);
+      const branches = branchData.branches || [];
+      const defaultBranch = branchData.default || "main";
+      currentBase = defaultBranch;
+      renderBaseSelect(branches, currentBase);
+      updateDeleteBranchVisibility();
+      updateURL(false);
+      await fetchAndRenderDiff();
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+  }
+
+  async function deleteWorktree() {
+    const sel = document.getElementById("wt-select");
+    const wt = sel ? sel.value : "";
+    if (!wt || !currentRepo) return;
+    if (!confirm(`Remove worktree "${wt}"? The working directory will be deleted.`)) return;
+
+    try {
+      const params = new URLSearchParams({ repo: currentRepo, worktree: wt });
+      const resp = await fetch("/api/worktrees?" + params.toString(), { method: "DELETE" });
+      if (!resp.ok) {
+        const data = await resp.json();
+        alert("Failed: " + (data.error || resp.statusText));
+        return;
+      }
+      // Refresh worktrees — switch to main worktree.
+      const wtData = await fetchJSON(`/api/worktrees?repo=${encodeURIComponent(currentRepo)}`);
+      const worktrees = wtData.worktrees || [];
+      if (worktrees.length > 1) {
+        currentWorktree = worktrees[0].name;
+        renderWorktreeSelect(worktrees, currentRepo, currentWorktree);
+      } else {
+        currentWorktree = null;
+        hideWorktreeSelect();
+      }
+      updateDeleteWorktreeVisibility();
+      updateURL(true);
+      await fetchAndRenderDiff();
+      startWS(currentRepo, currentWorktree);
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
   }
 
   function showBranchControl() {
@@ -243,7 +327,8 @@
     document.getElementById("diff-container").style.display = "none";
     document.getElementById("repo-list-container").style.display = "flex";
     document.getElementById("btn-back").style.display = "none";
-    document.querySelector(".header-right").style.display = "none";
+    document.querySelectorAll(".header-right").forEach((el) => (el.style.display = "none"));
+    document.getElementById("header-right-workspace").style.display = "";
     document.getElementById("header-title").textContent = "prview";
     currentRepo = null;
     currentWorktree = null;
@@ -258,7 +343,10 @@
     if (isWorkspace) {
       document.getElementById("btn-back").style.display = "";
     }
-    document.querySelector(".header-right").style.display = "";
+    document.getElementById("header-right-workspace").style.display = "none";
+    document.querySelectorAll(".header-right").forEach((el) => {
+      if (el.id !== "header-right-workspace") el.style.display = "";
+    });
     if (currentRepo) {
       document.getElementById("header-title").textContent = currentRepo;
     }
@@ -277,8 +365,12 @@
       opt.selected = wt.name === activeWorktreeName;
       sel.appendChild(opt);
     });
-    sel.onchange = () => selectWorktree(repoName, sel.value);
+    sel.onchange = () => {
+      selectWorktree(repoName, sel.value);
+      updateDeleteWorktreeVisibility();
+    };
     document.getElementById("worktree-control").style.display = "";
+    updateDeleteWorktreeVisibility();
   }
 
   function hideWorktreeSelect() {
@@ -293,12 +385,15 @@
     if (data.workspace && Array.isArray(data.repos) && data.repos.length > 0) {
       isWorkspace = true;
       reposCache = data.repos;
+      lastRepoData = data;
       return data.repos;
     }
     return null;
   }
 
-  function renderRepoListPage(repos, pushHistory) {
+  let lastRepoData = null;
+  function renderRepoListPage(repos, pushHistory, data) {
+    if (data) lastRepoData = data;
     if (pushHistory !== false) history.pushState({}, "", "/");
     showRepoList();
 
@@ -314,7 +409,7 @@
     const sorted = [...repos].sort((a, b) => {
       if (a.dirty && !b.dirty) return -1;
       if (!a.dirty && b.dirty) return 1;
-      return a.name.localeCompare(b.name);
+      return (b.lastCommit || 0) - (a.lastCommit || 0);
     });
 
     const table = document.createElement("table");
@@ -326,6 +421,7 @@
       <th>Repository</th>
       <th>Branch</th>
       <th>Status</th>
+      <th></th>
     </tr>`;
     table.appendChild(thead);
 
@@ -333,7 +429,6 @@
     sorted.forEach((repo) => {
       const tr = document.createElement("tr");
       tr.className = repo.dirty ? "repo-dirty" : "";
-      tr.onclick = () => selectRepo(repo.name);
 
       const indicator = repo.dirty
         ? '<span class="dot-dirty">●</span>'
@@ -343,7 +438,58 @@
         `<td class="repo-indicator">${indicator}</td>` +
         `<td class="repo-name">${repo.name}</td>` +
         `<td class="repo-branch">${repo.branch || ""}</td>` +
-        `<td class="repo-status">${repo.dirty ? "Changes" : "Clean"}</td>`;
+        `<td class="repo-status">${repo.dirty ? "Changes" : "Clean"}</td>` +
+        `<td class="repo-actions"><button class="repo-menu-btn" title="Actions">⋯</button>` +
+        `<div class="repo-menu">` +
+        `<button class="repo-menu-item" data-action="clear" data-repo="${repo.name}">Clear changes</button>` +
+        `<div class="repo-menu-divider"></div>` +
+        `<button class="repo-menu-item danger" data-action="hide" data-repo="${repo.name}">Hide this repo</button>` +
+        `</div></td>`;
+
+      // Row click → open repo (but not on actions column).
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest(".repo-actions")) return;
+        selectRepo(repo.name);
+      });
+
+      // Menu toggle.
+      const menuBtn = tr.querySelector(".repo-menu-btn");
+      const menu = tr.querySelector(".repo-menu");
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeAllMenus();
+        menu.classList.toggle("open");
+      });
+
+      // Menu item clicks.
+      menu.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const item = e.target.closest(".repo-menu-item");
+        if (!item) return;
+        const action = item.dataset.action;
+        const repoName = item.dataset.repo;
+        menu.classList.remove("open");
+
+        if (action === "clear") {
+          if (!confirm(`Clear all changes in "${repoName}"? This will discard uncommitted modifications.`)) return;
+          try {
+            const resp = await fetch(`/api/clear?repo=${encodeURIComponent(repoName)}`, { method: "POST" });
+            if (!resp.ok) { const d = await resp.json(); alert("Failed: " + (d.error || resp.statusText)); return; }
+            reposCache = null;
+            const resp2 = await fetchJSON("/api/repos");
+            if (resp2.repos) { reposCache = resp2.repos; lastRepoData = resp2; renderRepoListPage(resp2.repos, false, resp2); }
+          } catch (err) { alert("Error: " + err.message); }
+        } else if (action === "hide") {
+          if (!confirm(`Hide "${repoName}" from the workspace list?`)) return;
+          try {
+            const resp = await fetch(`/api/hide?repo=${encodeURIComponent(repoName)}`, { method: "POST" });
+            if (!resp.ok) { const d = await resp.json(); alert("Failed: " + (d.error || resp.statusText)); return; }
+            reposCache = null;
+            const resp2 = await fetchJSON("/api/repos");
+            if (resp2.repos) { reposCache = resp2.repos; lastRepoData = resp2; renderRepoListPage(resp2.repos, false, resp2); }
+          } catch (err) { alert("Error: " + err.message); }
+        }
+      });
 
       tbody.appendChild(tr);
     });
@@ -351,6 +497,18 @@
 
     container.innerHTML = "";
     container.appendChild(table);
+
+    // Update settings button visibility based on hidden count.
+    const hiddenCount = (data || lastRepoData || {}).hidden || 0;
+    // Update settings menu: show hidden item.
+    const hiddenItem = document.getElementById("settings-show-hidden");
+    const hiddenLabel = document.getElementById("lbl-show-hidden");
+    if (hiddenCount > 0) {
+      hiddenItem.style.display = "";
+      hiddenLabel.textContent = `Show hidden (${hiddenCount})`;
+    } else {
+      hiddenItem.style.display = "none";
+    }
   }
 
   // ── Repo diff ──
@@ -383,6 +541,7 @@
       currentBase = defaultBranch;
     }
     renderBaseSelect(branches, currentBase);
+    updateDeleteBranchVisibility();
     syncModeToggle();
 
     // Resolve worktree.
@@ -556,11 +715,44 @@
     };
   }
 
+  // ── Close all open repo menus ──
+
+  function closeAllMenus() {
+    document.querySelectorAll(".repo-menu.open, .settings-menu.open").forEach((m) => m.classList.remove("open"));
+  }
+  document.addEventListener("click", closeAllMenus);
+
   // ── Init ──
 
   async function init() {
     setupViewToggle();
     setupModeToggle();
+    document.getElementById("btn-delete-branch").onclick = deleteBranch;
+    document.getElementById("btn-delete-worktree").onclick = deleteWorktree;
+
+    // Settings dropdown toggle.
+    document.getElementById("btn-settings").onclick = (e) => {
+      e.stopPropagation();
+      const menu = document.getElementById("settings-menu");
+      closeAllMenus();
+      menu.classList.toggle("open");
+    };
+
+    // Show hidden checkbox.
+    let showingAll = false;
+    document.getElementById("chk-show-hidden").onchange = async (e) => {
+      showingAll = e.target.checked;
+      document.getElementById("settings-menu").classList.remove("open");
+      try {
+        const url = showingAll ? "/api/repos?all=true" : "/api/repos";
+        const resp = await fetchJSON(url);
+        if (resp.repos) {
+          reposCache = resp.repos;
+          lastRepoData = resp;
+          renderRepoListPage(resp.repos, false, resp);
+        }
+      } catch (_) {}
+    };
 
     // Read URL state at page load.
     const urlState = parseURLState();

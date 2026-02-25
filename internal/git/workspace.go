@@ -63,10 +63,11 @@ func parseWorktrees(raw string) []Worktree {
 
 // Repo represents a git repository found in the workspace.
 type Repo struct {
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Branch string `json:"branch"`
-	Dirty  bool   `json:"dirty"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	Dirty      bool   `json:"dirty"`
+	LastCommit int64  `json:"lastCommit"` // unix timestamp of latest commit
 }
 
 // IsGitRepo checks if the given directory is a git repository.
@@ -104,10 +105,11 @@ func discoverRecursive(baseDir, currentDir string, repos *[]Repo) {
 				continue
 			}
 			*repos = append(*repos, Repo{
-				Name:   filepath.ToSlash(relPath),
-				Path:   subdir,
-				Branch: gitBranch(subdir),
-				Dirty:  gitDirty(subdir),
+				Name:       filepath.ToSlash(relPath),
+				Path:       subdir,
+				Branch:     gitBranch(subdir),
+				Dirty:      gitDirty(subdir),
+				LastCommit: gitLastCommit(subdir),
 			})
 			// Stop here — don't recurse into git repo subdirectories.
 		} else {
@@ -122,6 +124,16 @@ func gitBranch(dir string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func gitLastCommit(dir string) int64 {
+	out, err := exec.Command("git", "-C", dir, "log", "-1", "--format=%ct").Output()
+	if err != nil {
+		return 0
+	}
+	var ts int64
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &ts)
+	return ts
 }
 
 func gitDirty(dir string) bool {
@@ -172,6 +184,64 @@ func DefaultBranch(repoDir string) string {
 		}
 	}
 	return branches[0]
+}
+
+// ClearRepo resets all changes in a repo (git checkout . + git clean -fd).
+func ClearRepo(repoDir string) error {
+	if out, err := exec.Command("git", "-C", repoDir, "checkout", ".").CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout: %s", strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "clean", "-fd").CombinedOutput(); err != nil {
+		return fmt.Errorf("clean: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CurrentBranch returns the current branch name of the repository.
+func CurrentBranch(repoDir string) string {
+	return gitBranch(repoDir)
+}
+
+// DeleteBranch deletes a local branch. Protected branches (main, master, current) are rejected.
+func DeleteBranch(repoDir, branch string, force bool) error {
+	if branch == "main" || branch == "master" {
+		return fmt.Errorf("cannot delete protected branch %q", branch)
+	}
+	current := gitBranch(repoDir)
+	if branch == current {
+		return fmt.Errorf("cannot delete the currently checked-out branch %q", branch)
+	}
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	args := []string{"-C", repoDir, "branch", flag, branch}
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// DeleteWorktree removes a linked worktree. The main worktree cannot be removed.
+func DeleteWorktree(repoDir, worktreeName string) error {
+	worktrees, err := GitWorktrees(repoDir)
+	if err != nil {
+		return err
+	}
+	for i, wt := range worktrees {
+		if wt.Name == worktreeName {
+			if i == 0 {
+				return fmt.Errorf("cannot remove the main worktree")
+			}
+			out, errRm := exec.Command("git", "-C", repoDir, "worktree", "remove", wt.Path).CombinedOutput()
+			if errRm != nil {
+				return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("worktree %q not found", worktreeName)
 }
 
 // DiffInRepo runs git diff in a specific repository directory.

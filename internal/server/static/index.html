@@ -18,6 +18,7 @@
         </svg>
         <span class="control-label">Base</span>
         <select id="base-select" title="Base branch to compare against"></select>
+        <button id="btn-delete-branch" class="delete-btn" disabled title="Delete this branch">🗑</button>
       </div>
       <div id="worktree-control" class="worktree-control" style="display:none;">
         <svg class="worktree-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -25,8 +26,22 @@
         </svg>
         <span class="control-label">Worktree</span>
         <select id="wt-select" title="Switch worktree"></select>
+        <button id="btn-delete-worktree" class="delete-btn" disabled title="Remove this worktree">🗑</button>
       </div>
       <span id="stats" class="stats"></span>
+    </div>
+    <div id="header-right-workspace" class="header-right" style="display:none;">
+      <div class="settings-wrapper">
+        <button id="btn-settings" class="settings-btn" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 10.16 1.29l.288 1.107c.018.066.079.158.212.224.231.114.454.243.668.386.123.082.233.09.3.071l1.102-.303c.644-.176 1.392.021 1.82.63.27.385.506.792.704 1.218.315.675.111 1.422-.364 1.891l-.814.806c-.049.048-.098.147-.088.294a6.7 6.7 0 0 1 0 .772c-.01.147.04.246.088.294l.814.806c.475.469.679 1.216.364 1.891a7.2 7.2 0 0 1-.704 1.218c-.428.609-1.176.806-1.82.63l-1.103-.303c-.066-.019-.176-.011-.299.071a5.4 5.4 0 0 1-.668.386c-.133.066-.194.158-.212.224l-.288 1.107c-.17.645-.716 1.195-1.459 1.26a8.1 8.1 0 0 1-1.402 0c-.743-.065-1.289-.615-1.459-1.26l-.289-1.107c-.017-.066-.078-.158-.211-.224a5.4 5.4 0 0 1-.668-.386c-.123-.082-.233-.09-.3-.071l-1.102.302c-.644.177-1.392-.02-1.82-.63a7.2 7.2 0 0 1-.704-1.217c-.315-.675-.111-1.422.364-1.891l.814-.806c.049-.048.098-.147.088-.294a6.7 6.7 0 0 1 0-.772c.01-.147-.04-.246-.088-.294l-.814-.806C.806 6.016.602 5.27.917 4.594a7.2 7.2 0 0 1 .704-1.218c.428-.609 1.176-.806 1.82-.63l1.103.303c.066.019.176.011.299-.071.214-.143.437-.272.668-.386.133-.066.194-.158.212-.224L5.84 1.29c.17-.645.716-1.195 1.459-1.26A8.2 8.2 0 0 1 8 0M5.5 8a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0"/></svg>
+        </button>
+        <div id="settings-menu" class="settings-menu">
+          <label class="settings-item" id="settings-show-hidden" style="display:none;">
+            <input type="checkbox" id="chk-show-hidden">
+            <span id="lbl-show-hidden">Show hidden</span>
+          </label>
+        </div>
+      </div>
     </div>
     <div class="header-right" style="display:none;">
       <div id="mode-toggle" class="mode-toggle">
