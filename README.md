@@ -5,7 +5,7 @@ GitHub-style git diff viewer in your browser.
 ## Install
 
 ```bash
-brew install flatcoke/prview/prview
+brew install flatcoke/tap/prview
 ```
 
 Or build from source:
