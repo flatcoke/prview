@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// Protected branch names that cannot be deleted.
+const (
+	branchMain   = "main"
+	branchMaster = "master"
+)
+
 // Worktree represents a git worktree.
 type Worktree struct {
 	Name   string `json:"name"`
@@ -20,7 +26,7 @@ type Worktree struct {
 func GitWorktrees(repoDir string) ([]Worktree, error) {
 	out, err := exec.Command("git", "-C", repoDir, "worktree", "list", "--porcelain").Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git worktree list: %w", err)
 	}
 	return parseWorktrees(string(out)), nil
 }
@@ -50,7 +56,7 @@ func parseWorktrees(raw string) []Worktree {
 			if wt.Branch != "" {
 				wt.Name = wt.Branch
 			} else {
-				wt.Name = "main"
+				wt.Name = branchMain
 			}
 		} else {
 			// Linked worktrees: name is the last path segment.
@@ -70,8 +76,8 @@ type Repo struct {
 	LastCommit int64  `json:"lastCommit"` // unix timestamp of latest commit
 }
 
-// IsGitRepo checks if the given directory is a git repository.
-// Handles both regular repos (.git is a directory) and submodules (.git is a file).
+// IsGitRepo reports whether dir is a git repository.
+// It handles both regular repos (.git is a directory) and submodules (.git is a file).
 func IsGitRepo(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".git"))
 	return err == nil
@@ -79,7 +85,7 @@ func IsGitRepo(dir string) bool {
 
 // DiscoverRepos finds git repositories in subdirectories of dir.
 // It recurses into non-git directories to find nested repos (e.g. "group/repo"),
-// but stops recursing once a .git is found (submodules are not listed separately).
+// but stops recursing once a .git entry is found (submodules are not listed separately).
 func DiscoverRepos(dir string) ([]Repo, error) {
 	var repos []Repo
 	discoverRecursive(dir, dir, &repos)
@@ -167,19 +173,19 @@ func ListBranches(repoDir string) ([]string, error) {
 }
 
 // DefaultBranch returns "main" if it exists in the repo, "master" if it exists,
-// or the first branch found. Falls back to "main" if nothing is found.
+// or the first branch found. Falls back to "main" if no branches are found.
 func DefaultBranch(repoDir string) string {
 	branches, err := ListBranches(repoDir)
 	if err != nil || len(branches) == 0 {
-		return "main"
+		return branchMain
 	}
 	for _, b := range branches {
-		if b == "main" {
+		if b == branchMain {
 			return b
 		}
 	}
 	for _, b := range branches {
-		if b == "master" {
+		if b == branchMaster {
 			return b
 		}
 	}
@@ -202,9 +208,10 @@ func CurrentBranch(repoDir string) string {
 	return gitBranch(repoDir)
 }
 
-// DeleteBranch deletes a local branch. Protected branches (main, master, current) are rejected.
+// DeleteBranch deletes a local branch. Protected branches (main, master) and the
+// currently checked-out branch are rejected.
 func DeleteBranch(repoDir, branch string, force bool) error {
-	if branch == "main" || branch == "master" {
+	if branch == branchMain || branch == branchMaster {
 		return fmt.Errorf("cannot delete protected branch %q", branch)
 	}
 	current := gitBranch(repoDir)
@@ -252,10 +259,10 @@ func DiffInRepo(repoDir string, args []string) (*DiffResult, error) {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if exitErr.ExitCode() != 1 {
-				return nil, err
+				return nil, fmt.Errorf("git diff: %w", err)
 			}
 		} else {
-			return nil, err
+			return nil, fmt.Errorf("git diff: %w", err)
 		}
 	}
 

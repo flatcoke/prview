@@ -42,6 +42,9 @@ type DiffResult struct {
 	RawDiff   string     `json:"rawDiff"`
 }
 
+// gitDiffExitChanges is the exit code git diff uses when differences are found.
+const gitDiffExitChanges = 1
+
 // Diff runs git diff and returns parsed results.
 func Diff(args []string) (*DiffResult, error) {
 	cmdArgs := append([]string{"diff", "--unified=3", "--no-color"}, args...)
@@ -49,10 +52,8 @@ func Diff(args []string) (*DiffResult, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			// git diff exits 1 when there are differences
-			if exitErr.ExitCode() == 1 {
-				// that's fine
-			} else {
+			// git diff exits 1 when there are differences — that is expected.
+			if exitErr.ExitCode() != gitDiffExitChanges {
 				return nil, fmt.Errorf("git diff failed: %s", string(exitErr.Stderr))
 			}
 		} else {
@@ -80,7 +81,7 @@ func Parse(raw string) *DiffResult {
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 
-		// New file diff header
+		// New file diff header.
 		if strings.HasPrefix(line, "diff --git ") {
 			if current != nil {
 				if currentHunk != nil {
@@ -110,7 +111,7 @@ func Parse(raw string) *DiffResult {
 			continue
 		}
 
-		// File mode lines
+		// File status lines.
 		if strings.HasPrefix(line, "new file mode") {
 			current.Status = "added"
 			current.OldName = "/dev/null"
@@ -135,16 +136,19 @@ func Parse(raw string) *DiffResult {
 			continue
 		}
 
-		// Skip --- and +++ lines
+		// Skip --- and +++ lines.
 		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
 			continue
 		}
-		// Skip index lines
-		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "similarity index") || strings.HasPrefix(line, "old mode") || strings.HasPrefix(line, "new mode") {
+		// Skip index/mode lines.
+		if strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "similarity index") ||
+			strings.HasPrefix(line, "old mode") ||
+			strings.HasPrefix(line, "new mode") {
 			continue
 		}
 
-		// Hunk header
+		// Hunk header.
 		if strings.HasPrefix(line, "@@") {
 			if currentHunk != nil {
 				current.Hunks = append(current.Hunks, *currentHunk)
@@ -154,25 +158,26 @@ func Parse(raw string) *DiffResult {
 			continue
 		}
 
-		// Diff content lines
+		// Diff content lines.
 		if currentHunk != nil {
-			if strings.HasPrefix(line, "+") {
+			switch {
+			case strings.HasPrefix(line, "+"):
 				currentHunk.Lines = append(currentHunk.Lines, Line{Type: "add", Content: line[1:]})
 				current.Additions++
 				result.Additions++
-			} else if strings.HasPrefix(line, "-") {
+			case strings.HasPrefix(line, "-"):
 				currentHunk.Lines = append(currentHunk.Lines, Line{Type: "del", Content: line[1:]})
 				current.Deletions++
 				result.Deletions++
-			} else if strings.HasPrefix(line, " ") {
+			case strings.HasPrefix(line, " "):
 				currentHunk.Lines = append(currentHunk.Lines, Line{Type: "context", Content: line[1:]})
-			} else if line == `\ No newline at end of file` {
+			case line == `\ No newline at end of file`:
 				// skip
 			}
 		}
 	}
 
-	// Flush last file
+	// Flush last file.
 	if current != nil {
 		if currentHunk != nil {
 			current.Hunks = append(current.Hunks, *currentHunk)

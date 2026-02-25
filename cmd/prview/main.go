@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -18,13 +18,15 @@ import (
 	"github.com/flatcoke/prview/internal/server"
 )
 
+const defaultPort = 8888
+
 var (
 	version = "dev"
 	commit  = "none"
 )
 
 func main() {
-	port := flag.Int("port", 8888, "Port to listen on")
+	port := flag.Int("port", defaultPort, "Port to listen on")
 	staged := flag.Bool("staged", false, "Show staged changes")
 	all := flag.Bool("all", false, "Show staged + unstaged changes")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically")
@@ -49,10 +51,10 @@ func main() {
 		}
 	}
 
-	// Detect mode: single repo vs workspace
+	// Detect mode: single repo vs workspace.
 	isWorkspace := false
 	if !git.IsGitRepo(workDir) {
-		// Not a git repo — check if subdirectories contain repos
+		// Not a git repo — check if subdirectories contain repos.
 		repos, err := git.DiscoverRepos(workDir)
 		if err == nil && len(repos) > 0 {
 			isWorkspace = true
@@ -100,6 +102,7 @@ func main() {
 	fmt.Println("\nprview stopped.")
 }
 
+// openBrowser launches the system default browser pointing at url.
 func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

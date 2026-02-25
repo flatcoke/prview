@@ -1,17 +1,75 @@
 (function () {
   "use strict";
 
-  let currentView = "side-by-side";
-  let diffData = null;
-  let isWorkspace = false;
-  let currentRepo = null;
-  let currentWorktree = null;
-  let reposCache = null;
-  let currentBase = null;
-  let currentMode = "branch"; // "branch" | "uncommitted"
+  // ── Constants ──
 
-  // Active WebSocket manager — holds the current live connection.
+  /** API endpoint paths. */
+  const API = {
+    diff:      "/api/diff",
+    repos:     "/api/repos",
+    branches:  "/api/branches",
+    worktrees: "/api/worktrees",
+    clear:     "/api/clear",
+    hide:      "/api/hide",
+  };
+
+  /** WebSocket reconnect backoff parameters (milliseconds). */
+  const WS_RECONNECT = {
+    initialDelay: 1000,
+    maxDelay:     16000,
+  };
+
+  /** Element IDs referenced from JavaScript. */
+  const ID = {
+    btnBack:              "btn-back",
+    headerTitle:          "header-title",
+    baseBranchControl:    "base-branch-control",
+    baseSelect:           "base-select",
+    btnDeleteBranch:      "btn-delete-branch",
+    worktreeControl:      "worktree-control",
+    wtSelect:             "wt-select",
+    btnDeleteWorktree:    "btn-delete-worktree",
+    stats:                "stats",
+    headerRightWorkspace: "header-right-workspace",
+    btnSettings:          "btn-settings",
+    settingsMenu:         "settings-menu",
+    settingsShowHidden:   "settings-show-hidden",
+    lblShowHidden:        "lbl-show-hidden",
+    chkShowHidden:        "chk-show-hidden",
+    btnModeBranch:        "btn-mode-branch",
+    btnModeUncommitted:   "btn-mode-uncommitted",
+    liveDot:              "live-dot",
+    btnUnified:           "btn-unified",
+    btnSplit:             "btn-split",
+    sidebar:              "sidebar",
+    diffContainer:        "diff-container",
+    repoListContainer:    "repo-list-container",
+    fileList:             "file-list",
+    loading:              "loading",
+  };
+
+  // ── State ──
+
+  let currentView     = "side-by-side";
+  let diffData        = null;
+  let isWorkspace     = false;
+  let currentRepo     = null;
+  let currentWorktree = null;
+  let reposCache      = null;
+  let currentBase     = null;
+  let currentMode     = "branch"; // "branch" | "uncommitted"
+
+  /** Active WebSocket manager — holds the current live connection. */
   let wsManager = null;
+
+  /** Cached DOM element references — populated by initDom() during init. */
+  const dom = {};
+
+  function initDom() {
+    Object.entries(ID).forEach(([key, id]) => {
+      dom[key] = document.getElementById(id);
+    });
+  }
 
   // ── HTTP ──
 
@@ -25,15 +83,15 @@
 
   function parseURLState() {
     const pathname = window.location.pathname;
-    const params = new URLSearchParams(window.location.search);
-    const base = params.get("base") || null;
-    const mode = params.get("mode") || "branch";
+    const params   = new URLSearchParams(window.location.search);
+    const base     = params.get("base") || null;
+    const mode     = params.get("mode") || "branch";
 
     const m = pathname.match(/^\/repos\/(.+)$/);
     if (!m) return { repoName: null, worktreeName: null, base, mode };
 
     const rest = m[1];
-    const wtm = rest.match(/^(.+)\/worktrees\/([^/]+)$/);
+    const wtm  = rest.match(/^(.+)\/worktrees\/([^/]+)$/);
     if (wtm) return { repoName: wtm[1], worktreeName: wtm[2], base, mode };
     return { repoName: rest, worktreeName: null, base, mode };
   }
@@ -52,23 +110,18 @@
 
   function buildDiffUrl(repoName, worktreeName) {
     const params = new URLSearchParams();
-    if (repoName) params.set("repo", repoName);
+    if (repoName)     params.set("repo", repoName);
     if (worktreeName) params.set("worktree", worktreeName);
     params.set("mode", currentMode);
     if (currentMode === "branch" && currentBase) params.set("base", currentBase);
-    return "/api/diff?" + params.toString();
+    return API.diff + "?" + params.toString();
   }
 
   function updateURL(push) {
-    const url = buildPageURL(currentRepo, currentWorktree);
-    const state = {
-      repo: currentRepo,
-      worktree: currentWorktree,
-      base: currentBase,
-      mode: currentMode,
-    };
+    const url   = buildPageURL(currentRepo, currentWorktree);
+    const state = { repo: currentRepo, worktree: currentWorktree, base: currentBase, mode: currentMode };
     if (push) history.pushState(state, "", url);
-    else history.replaceState(state, "", url);
+    else      history.replaceState(state, "", url);
   }
 
   // ── Diff fetching & rendering ──
@@ -89,18 +142,19 @@
   // ── WebSocket live refresh ──
 
   function setLiveIndicator(state) {
-    const dot = document.getElementById("live-dot");
-    if (!dot) return;
-    dot.className = "live-dot" + (state ? " " + state : "");
+    if (!dom.liveDot) return;
+    dom.liveDot.className = "live-dot" + (state ? " " + state : "");
   }
 
-  // connectWS opens a WebSocket to /ws with optional repo/worktree params and
-  // returns a manager object with a stop() method.
+  /**
+   * connectWS opens a WebSocket to /ws with optional repo/worktree params and
+   * returns a manager object with a stop() method.
+   */
   function connectWS(repo, worktree) {
-    let ws = null;
-    let stopped = false;
+    let ws             = null;
+    let stopped        = false;
     let reconnectTimer = null;
-    let reconnectDelay = 1000;
+    let reconnectDelay = WS_RECONNECT.initialDelay;
 
     function buildURL() {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -117,7 +171,7 @@
       ws = new WebSocket(buildURL());
 
       ws.onopen = function () {
-        reconnectDelay = 1000;
+        reconnectDelay = WS_RECONNECT.initialDelay;
         setLiveIndicator("connected");
       };
 
@@ -137,7 +191,7 @@
         if (stopped) return;
         setLiveIndicator("reconnecting");
         reconnectTimer = setTimeout(function () {
-          reconnectDelay = Math.min(reconnectDelay * 2, 16000);
+          reconnectDelay = Math.min(reconnectDelay * 2, WS_RECONNECT.maxDelay);
           connect();
         }, reconnectDelay);
       };
@@ -162,17 +216,17 @@
     };
   }
 
-  // refreshDiff re-fetches the current diff without touching UI chrome.
+  /** refreshDiff re-fetches the current diff without touching UI chrome. */
   async function refreshDiff() {
     try {
-      const url = buildDiffUrl(currentRepo, currentWorktree);
+      const url  = buildDiffUrl(currentRepo, currentWorktree);
       const data = await fetchJSON(url);
       diffData = data;
       renderStats(data);
       renderFileList(data);
       renderDiff(data);
     } catch (_) {
-      // Silently ignore refresh errors — stale view is better than error flash.
+      // Silently ignore refresh errors — stale view is better than an error flash.
     }
   }
 
@@ -192,24 +246,23 @@
 
   async function loadBranches(repoName) {
     const url = repoName
-      ? `/api/branches?repo=${encodeURIComponent(repoName)}`
-      : "/api/branches";
+      ? `${API.branches}?repo=${encodeURIComponent(repoName)}`
+      : API.branches;
     return fetchJSON(url);
   }
 
   function renderBaseSelect(branches, selectedBranch) {
-    const sel = document.getElementById("base-select");
-    sel.innerHTML = "";
+    dom.baseSelect.innerHTML = "";
     (branches || []).forEach((b) => {
       const opt = document.createElement("option");
-      opt.value = b;
+      opt.value     = b;
       opt.textContent = b;
-      opt.selected = b === selectedBranch;
-      sel.appendChild(opt);
+      opt.selected  = b === selectedBranch;
+      dom.baseSelect.appendChild(opt);
     });
-    sel.value = selectedBranch || "";
-    sel.onchange = () => {
-      currentBase = sel.value;
+    dom.baseSelect.value    = selectedBranch || "";
+    dom.baseSelect.onchange = () => {
+      currentBase = dom.baseSelect.value;
       updateDeleteBranchVisibility();
       updateURL(false);
       fetchAndRenderDiff();
@@ -219,42 +272,35 @@
   // ── Delete handlers ──
 
   function updateDeleteBranchVisibility() {
-    const btn = document.getElementById("btn-delete-branch");
-    if (!btn) return;
-    // Hide if selected base is the current branch (can't delete checked-out branch)
-    // or if it's main/master
-    const sel = document.getElementById("base-select");
-    const selected = sel ? sel.value : "";
+    if (!dom.btnDeleteBranch) return;
+    const selected    = dom.baseSelect ? dom.baseSelect.value : "";
     const isProtected = selected === "main" || selected === "master";
-    btn.disabled = isProtected;
+    dom.btnDeleteBranch.disabled = isProtected;
   }
 
   function updateDeleteWorktreeVisibility() {
-    const btn = document.getElementById("btn-delete-worktree");
-    if (!btn) return;
-    const sel = document.getElementById("wt-select");
-    const options = sel ? sel.options : [];
-    btn.disabled = options.length <= 1 || sel.selectedIndex === 0;
+    if (!dom.btnDeleteWorktree) return;
+    const options = dom.wtSelect ? dom.wtSelect.options : [];
+    dom.btnDeleteWorktree.disabled = options.length <= 1 || dom.wtSelect.selectedIndex === 0;
   }
 
   async function deleteBranch() {
-    const sel = document.getElementById("base-select");
-    const branch = sel ? sel.value : "";
+    const branch = dom.baseSelect ? dom.baseSelect.value : "";
     if (!branch) return;
     if (!confirm(`Delete branch "${branch}"? This cannot be undone.`)) return;
 
     try {
       const params = new URLSearchParams({ branch });
       if (currentRepo) params.set("repo", currentRepo);
-      const resp = await fetch("/api/branches?" + params.toString(), { method: "DELETE" });
+      const resp = await fetch(API.branches + "?" + params.toString(), { method: "DELETE" });
       if (!resp.ok) {
         const data = await resp.json();
         alert("Failed: " + (data.error || resp.statusText));
         return;
       }
-      // Refresh branches — reset to default if deleted was selected.
-      const branchData = await loadBranches(currentRepo || null);
-      const branches = branchData.branches || [];
+      // Refresh branches — reset to default.
+      const branchData   = await loadBranches(currentRepo || null);
+      const branches     = branchData.branches || [];
       const defaultBranch = branchData.default || "main";
       currentBase = defaultBranch;
       renderBaseSelect(branches, currentBase);
@@ -267,21 +313,20 @@
   }
 
   async function deleteWorktree() {
-    const sel = document.getElementById("wt-select");
-    const wt = sel ? sel.value : "";
-    if (!wt || !currentRepo) return;
-    if (!confirm(`Remove worktree "${wt}"? The working directory will be deleted.`)) return;
+    const worktree = dom.wtSelect ? dom.wtSelect.value : "";
+    if (!worktree || !currentRepo) return;
+    if (!confirm(`Remove worktree "${worktree}"? The working directory will be deleted.`)) return;
 
     try {
-      const params = new URLSearchParams({ repo: currentRepo, worktree: wt });
-      const resp = await fetch("/api/worktrees?" + params.toString(), { method: "DELETE" });
+      const params = new URLSearchParams({ repo: currentRepo, worktree });
+      const resp   = await fetch(API.worktrees + "?" + params.toString(), { method: "DELETE" });
       if (!resp.ok) {
         const data = await resp.json();
         alert("Failed: " + (data.error || resp.statusText));
         return;
       }
       // Refresh worktrees — switch to main worktree.
-      const wtData = await fetchJSON(`/api/worktrees?repo=${encodeURIComponent(currentRepo)}`);
+      const wtData   = await fetchJSON(`${API.worktrees}?repo=${encodeURIComponent(currentRepo)}`);
       const worktrees = wtData.worktrees || [];
       if (worktrees.length > 1) {
         currentWorktree = worktrees[0].name;
@@ -300,18 +345,18 @@
   }
 
   function showBranchControl() {
-    document.getElementById("base-branch-control").style.display = "";
+    dom.baseBranchControl.style.display = "";
   }
 
   function hideBranchControl() {
-    document.getElementById("base-branch-control").style.display = "none";
+    dom.baseBranchControl.style.display = "none";
   }
 
-  // syncModeToggle updates button active states and shows/hides base-branch-control.
+  /** syncModeToggle updates button active states and shows/hides the base-branch control. */
   function syncModeToggle() {
     const isBranch = currentMode === "branch";
-    document.getElementById("btn-mode-branch").classList.toggle("active", isBranch);
-    document.getElementById("btn-mode-uncommitted").classList.toggle("active", !isBranch);
+    dom.btnModeBranch.classList.toggle("active", isBranch);
+    dom.btnModeUncommitted.classList.toggle("active", !isBranch);
     if (isBranch) {
       showBranchControl();
     } else {
@@ -323,32 +368,32 @@
 
   function showRepoList() {
     stopWS();
-    document.getElementById("sidebar").style.display = "none";
-    document.getElementById("diff-container").style.display = "none";
-    document.getElementById("repo-list-container").style.display = "flex";
-    document.getElementById("btn-back").style.display = "none";
+    dom.sidebar.style.display           = "none";
+    dom.diffContainer.style.display     = "none";
+    dom.repoListContainer.style.display = "flex";
+    dom.btnBack.style.display           = "none";
     document.querySelectorAll(".header-right").forEach((el) => (el.style.display = "none"));
-    document.getElementById("header-right-workspace").style.display = "";
-    document.getElementById("header-title").textContent = "prview";
-    currentRepo = null;
+    dom.headerRightWorkspace.style.display = "";
+    dom.headerTitle.textContent = "prview";
+    currentRepo     = null;
     currentWorktree = null;
     hideWorktreeSelect();
     hideBranchControl();
   }
 
   function showDiffView() {
-    document.getElementById("sidebar").style.display = "";
-    document.getElementById("diff-container").style.display = "";
-    document.getElementById("repo-list-container").style.display = "none";
+    dom.sidebar.style.display           = "";
+    dom.diffContainer.style.display     = "";
+    dom.repoListContainer.style.display = "none";
     if (isWorkspace) {
-      document.getElementById("btn-back").style.display = "";
+      dom.btnBack.style.display = "";
     }
-    document.getElementById("header-right-workspace").style.display = "none";
+    dom.headerRightWorkspace.style.display = "none";
     document.querySelectorAll(".header-right").forEach((el) => {
-      if (el.id !== "header-right-workspace") el.style.display = "";
+      if (el.id !== ID.headerRightWorkspace) el.style.display = "";
     });
     if (currentRepo) {
-      document.getElementById("header-title").textContent = currentRepo;
+      dom.headerTitle.textContent = currentRepo;
     }
     syncModeToggle();
   }
@@ -356,35 +401,34 @@
   // ── Worktree dropdown ──
 
   function renderWorktreeSelect(worktrees, repoName, activeWorktreeName) {
-    const sel = document.getElementById("wt-select");
-    sel.innerHTML = "";
+    dom.wtSelect.innerHTML = "";
     worktrees.forEach((wt) => {
       const opt = document.createElement("option");
-      opt.value = wt.name;
+      opt.value       = wt.name;
       opt.textContent = wt.branch || wt.name;
-      opt.selected = wt.name === activeWorktreeName;
-      sel.appendChild(opt);
+      opt.selected    = wt.name === activeWorktreeName;
+      dom.wtSelect.appendChild(opt);
     });
-    sel.onchange = () => {
-      selectWorktree(repoName, sel.value);
+    dom.wtSelect.onchange = () => {
+      selectWorktree(repoName, dom.wtSelect.value);
       updateDeleteWorktreeVisibility();
     };
-    document.getElementById("worktree-control").style.display = "";
+    dom.worktreeControl.style.display = "";
     updateDeleteWorktreeVisibility();
   }
 
   function hideWorktreeSelect() {
-    document.getElementById("worktree-control").style.display = "none";
-    document.getElementById("wt-select").innerHTML = "";
+    dom.worktreeControl.style.display = "none";
+    dom.wtSelect.innerHTML = "";
   }
 
   // ── Workspace / repo list ──
 
   async function loadWorkspace() {
-    const data = await fetchJSON("/api/repos");
+    const data = await fetchJSON(API.repos);
     if (data.workspace && Array.isArray(data.repos) && data.repos.length > 0) {
       isWorkspace = true;
-      reposCache = data.repos;
+      reposCache  = data.repos;
       lastRepoData = data;
       return data.repos;
     }
@@ -392,18 +436,16 @@
   }
 
   let lastRepoData = null;
+
   function renderRepoListPage(repos, pushHistory, data) {
     if (data) lastRepoData = data;
     if (pushHistory !== false) history.pushState({}, "", "/");
     showRepoList();
 
-    const container = document.getElementById("repo-list-container");
-    const stats = document.getElementById("stats");
-
     const dirtyCount = repos.filter((r) => r.dirty).length;
-    stats.innerHTML = `${repos.length} repositories`;
+    dom.stats.innerHTML = `${repos.length} repositories`;
     if (dirtyCount > 0) {
-      stats.innerHTML += ` &nbsp;<span class="add">${dirtyCount} with changes</span>`;
+      dom.stats.innerHTML += ` &nbsp;<span class="add">${dirtyCount} with changes</span>`;
     }
 
     const sorted = [...repos].sort((a, b) => {
@@ -446,7 +488,7 @@
         `<button class="repo-menu-item danger" data-action="hide" data-repo="${repo.name}">Hide this repo</button>` +
         `</div></td>`;
 
-      // Row click → open repo (but not on actions column).
+      // Row click → open repo (but not on the actions column).
       tr.addEventListener("click", (e) => {
         if (e.target.closest(".repo-actions")) return;
         selectRepo(repo.name);
@@ -454,39 +496,31 @@
 
       // Menu toggle.
       const menuBtn = tr.querySelector(".repo-menu-btn");
-      const menu = tr.querySelector(".repo-menu");
+      const menu    = tr.querySelector(".repo-menu");
       menuBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         closeAllMenus();
         menu.classList.toggle("open");
       });
 
-      // Menu item clicks.
+      // Menu item clicks — use event delegation on the menu container.
       menu.addEventListener("click", async (e) => {
         e.stopPropagation();
         const item = e.target.closest(".repo-menu-item");
         if (!item) return;
-        const action = item.dataset.action;
+        const action   = item.dataset.action;
         const repoName = item.dataset.repo;
         menu.classList.remove("open");
 
         if (action === "clear") {
           if (!confirm(`Clear all changes in "${repoName}"? This will discard uncommitted modifications.`)) return;
           try {
-            const resp = await fetch(`/api/clear?repo=${encodeURIComponent(repoName)}`, { method: "POST" });
-            if (!resp.ok) { const d = await resp.json(); alert("Failed: " + (d.error || resp.statusText)); return; }
-            reposCache = null;
-            const resp2 = await fetchJSON("/api/repos");
-            if (resp2.repos) { reposCache = resp2.repos; lastRepoData = resp2; renderRepoListPage(resp2.repos, false, resp2); }
+            await repoActionAndReload(`${API.clear}?repo=${encodeURIComponent(repoName)}`, "POST");
           } catch (err) { alert("Error: " + err.message); }
         } else if (action === "hide") {
           if (!confirm(`Hide "${repoName}" from the workspace list?`)) return;
           try {
-            const resp = await fetch(`/api/hide?repo=${encodeURIComponent(repoName)}`, { method: "POST" });
-            if (!resp.ok) { const d = await resp.json(); alert("Failed: " + (d.error || resp.statusText)); return; }
-            reposCache = null;
-            const resp2 = await fetchJSON("/api/repos");
-            if (resp2.repos) { reposCache = resp2.repos; lastRepoData = resp2; renderRepoListPage(resp2.repos, false, resp2); }
+            await repoActionAndReload(`${API.hide}?repo=${encodeURIComponent(repoName)}`, "POST");
           } catch (err) { alert("Error: " + err.message); }
         }
       });
@@ -495,27 +529,45 @@
     });
     table.appendChild(tbody);
 
-    container.innerHTML = "";
-    container.appendChild(table);
+    dom.repoListContainer.innerHTML = "";
+    dom.repoListContainer.appendChild(table);
 
-    // Update settings button visibility based on hidden count.
+    // Update settings menu: show or hide the "show hidden" item.
     const hiddenCount = (data || lastRepoData || {}).hidden || 0;
-    // Update settings menu: show hidden item.
-    const hiddenItem = document.getElementById("settings-show-hidden");
-    const hiddenLabel = document.getElementById("lbl-show-hidden");
     if (hiddenCount > 0) {
-      hiddenItem.style.display = "";
-      hiddenLabel.textContent = `Show hidden (${hiddenCount})`;
+      dom.settingsShowHidden.style.display = "";
+      dom.lblShowHidden.textContent = `Show hidden (${hiddenCount})`;
     } else {
-      hiddenItem.style.display = "none";
+      dom.settingsShowHidden.style.display = "none";
     }
+  }
+
+  /**
+   * repoActionAndReload sends a request to url, then re-fetches and re-renders
+   * the repo list. Returns false if the server returned an error.
+   */
+  async function repoActionAndReload(url, method) {
+    const resp = await fetch(url, { method });
+    if (!resp.ok) {
+      const data = await resp.json();
+      alert("Failed: " + (data.error || resp.statusText));
+      return false;
+    }
+    reposCache = null;
+    const freshData = await fetchJSON(API.repos);
+    if (freshData.repos) {
+      reposCache   = freshData.repos;
+      lastRepoData = freshData;
+      renderRepoListPage(freshData.repos, false, freshData);
+    }
+    return true;
   }
 
   // ── Repo diff ──
 
-  // selectRepo loads a repo view. initialBase/initialMode come from URL or popstate.
+  /** selectRepo loads a repo diff view. initialBase/initialMode come from URL or popstate. */
   async function selectRepo(repoName, initialWorktree, initialBase, initialMode) {
-    currentRepo = repoName;
+    currentRepo     = repoName;
     currentWorktree = null;
     if (initialMode) currentMode = initialMode;
 
@@ -525,21 +577,17 @@
     // Load branches and worktrees in parallel.
     const [branchResult, worktreeResult] = await Promise.allSettled([
       loadBranches(repoName),
-      fetchJSON(`/api/worktrees?repo=${encodeURIComponent(repoName)}`),
+      fetchJSON(`${API.worktrees}?repo=${encodeURIComponent(repoName)}`),
     ]);
 
     // Resolve base branch.
-    let branches = [];
+    let branches      = [];
     let defaultBranch = "main";
     if (branchResult.status === "fulfilled") {
-      branches = branchResult.value.branches || [];
-      defaultBranch = branchResult.value.default || "main";
+      branches      = branchResult.value.branches || [];
+      defaultBranch = branchResult.value.default  || "main";
     }
-    if (initialBase && branches.includes(initialBase)) {
-      currentBase = initialBase;
-    } else {
-      currentBase = defaultBranch;
-    }
+    currentBase = (initialBase && branches.includes(initialBase)) ? initialBase : defaultBranch;
     renderBaseSelect(branches, currentBase);
     updateDeleteBranchVisibility();
     syncModeToggle();
@@ -549,9 +597,8 @@
     if (worktreeResult.status === "fulfilled") {
       worktrees = worktreeResult.value.worktrees || [];
     }
-    let activeWt = null;
     if (worktrees.length > 1) {
-      activeWt = initialWorktree || worktrees[0].name;
+      const activeWt  = initialWorktree || worktrees[0].name;
       currentWorktree = activeWt;
       renderWorktreeSelect(worktrees, repoName, activeWt);
     } else {
@@ -570,8 +617,8 @@
   }
 
   async function selectWorktree(repoName, worktreeName) {
-    currentWorktree = worktreeName;
-    document.getElementById("wt-select").value = worktreeName;
+    currentWorktree         = worktreeName;
+    dom.wtSelect.value      = worktreeName;
 
     history.pushState(
       { repo: repoName, worktree: worktreeName, base: currentBase, mode: currentMode },
@@ -586,34 +633,31 @@
 
   function setDiffLoading(repoName) {
     const label = repoName ? `Loading ${repoName}…` : "Loading…";
-    document.getElementById("stats").innerHTML = label;
-    document.getElementById("file-list").innerHTML = "";
-    document.getElementById("diff-container").innerHTML =
-      '<div class="diff-loading">Loading diff…</div>';
+    dom.stats.innerHTML        = label;
+    dom.fileList.innerHTML     = "";
+    dom.diffContainer.innerHTML = '<div class="diff-loading">Loading diff…</div>';
   }
 
   function renderDiffError(message) {
-    document.getElementById("diff-container").innerHTML =
-      `<div class="diff-error">Error: ${message}</div>`;
+    dom.diffContainer.innerHTML = `<div class="diff-error">Error: ${message}</div>`;
   }
 
   // ── Stats / file list / diff rendering ──
 
   function renderStats(data) {
     const nFiles = data.files ? data.files.length : 0;
-    document.getElementById("stats").innerHTML =
+    dom.stats.innerHTML =
       `${nFiles} file${nFiles !== 1 ? "s" : ""} changed &nbsp;` +
       `<span class="add">+${data.additions || 0}</span> &nbsp;` +
       `<span class="del">-${data.deletions || 0}</span>`;
   }
 
   function renderFileList(data) {
-    const ul = document.getElementById("file-list");
-    ul.innerHTML = "";
+    dom.fileList.innerHTML = "";
     if (!data.files) return;
 
     data.files.forEach((file, idx) => {
-      const li = document.createElement("li");
+      const li   = document.createElement("li");
       li.onclick = () => scrollToFile(idx);
 
       const name =
@@ -632,32 +676,30 @@
         (file.deletions ? `<span class="del">-${file.deletions}</span>` : "") +
         `</span>`;
 
-      ul.appendChild(li);
+      dom.fileList.appendChild(li);
     });
   }
 
   function renderDiff(data) {
-    const container = document.getElementById("diff-container");
-
     if (!data.rawDiff || data.rawDiff.trim() === "") {
-      container.innerHTML = '<div class="diff-empty">No changes detected.</div>';
+      dom.diffContainer.innerHTML = '<div class="diff-empty">No changes detected.</div>';
       return;
     }
 
     const html = Diff2Html.html(data.rawDiff, {
       drawFileList: false,
-      matching: "lines",
+      matching:     "lines",
       outputFormat: currentView,
-      colorScheme: "dark",
+      colorScheme:  "dark",
     });
-    container.innerHTML = html;
+    dom.diffContainer.innerHTML = html;
 
-    container.querySelectorAll(".d2h-file-header").forEach((header, idx) => {
+    dom.diffContainer.querySelectorAll(".d2h-file-header").forEach((header, idx) => {
       header.id = `file-header-${idx}`;
-      const btn = document.createElement("button");
+      const btn     = document.createElement("button");
       btn.className = "file-collapse-btn";
       btn.innerHTML = "▼";
-      btn.onclick = (e) => {
+      btn.onclick   = (e) => {
         e.stopPropagation();
         toggleFile(btn);
       };
@@ -667,7 +709,7 @@
 
   function toggleFile(btn) {
     const wrapper = btn.closest(".d2h-file-wrapper");
-    const diff = wrapper && wrapper.querySelector(".d2h-file-diff");
+    const diff    = wrapper && wrapper.querySelector(".d2h-file-diff");
     if (!diff) return;
     const collapsed = diff.style.display === "none";
     diff.style.display = collapsed ? "" : "none";
@@ -682,16 +724,16 @@
   // ── View toggle ──
 
   function setupViewToggle() {
-    document.getElementById("btn-unified").onclick = () => {
+    dom.btnUnified.onclick = () => {
       currentView = "line-by-line";
-      document.getElementById("btn-unified").classList.add("active");
-      document.getElementById("btn-split").classList.remove("active");
+      dom.btnUnified.classList.add("active");
+      dom.btnSplit.classList.remove("active");
       if (diffData) renderDiff(diffData);
     };
-    document.getElementById("btn-split").onclick = () => {
+    dom.btnSplit.onclick = () => {
       currentView = "side-by-side";
-      document.getElementById("btn-split").classList.add("active");
-      document.getElementById("btn-unified").classList.remove("active");
+      dom.btnSplit.classList.add("active");
+      dom.btnUnified.classList.remove("active");
       if (diffData) renderDiff(diffData);
     };
   }
@@ -699,14 +741,14 @@
   // ── Mode toggle ──
 
   function setupModeToggle() {
-    document.getElementById("btn-mode-branch").onclick = () => {
+    dom.btnModeBranch.onclick = () => {
       if (currentMode === "branch") return;
       currentMode = "branch";
       syncModeToggle();
       updateURL(false);
       fetchAndRenderDiff();
     };
-    document.getElementById("btn-mode-uncommitted").onclick = () => {
+    dom.btnModeUncommitted.onclick = () => {
       if (currentMode === "uncommitted") return;
       currentMode = "uncommitted";
       syncModeToggle();
@@ -715,7 +757,7 @@
     };
   }
 
-  // ── Close all open repo menus ──
+  // ── Close all open menus ──
 
   function closeAllMenus() {
     document.querySelectorAll(".repo-menu.open, .settings-menu.open").forEach((m) => m.classList.remove("open"));
@@ -725,29 +767,30 @@
   // ── Init ──
 
   async function init() {
+    initDom();
+
     setupViewToggle();
     setupModeToggle();
-    document.getElementById("btn-delete-branch").onclick = deleteBranch;
-    document.getElementById("btn-delete-worktree").onclick = deleteWorktree;
+    dom.btnDeleteBranch.onclick  = deleteBranch;
+    dom.btnDeleteWorktree.onclick = deleteWorktree;
 
     // Settings dropdown toggle.
-    document.getElementById("btn-settings").onclick = (e) => {
+    dom.btnSettings.onclick = (e) => {
       e.stopPropagation();
-      const menu = document.getElementById("settings-menu");
       closeAllMenus();
-      menu.classList.toggle("open");
+      dom.settingsMenu.classList.toggle("open");
     };
 
     // Show hidden checkbox.
     let showingAll = false;
-    document.getElementById("chk-show-hidden").onchange = async (e) => {
+    dom.chkShowHidden.onchange = async (e) => {
       showingAll = e.target.checked;
-      document.getElementById("settings-menu").classList.remove("open");
+      dom.settingsMenu.classList.remove("open");
       try {
-        const url = showingAll ? "/api/repos?all=true" : "/api/repos";
+        const url  = showingAll ? `${API.repos}?all=true` : API.repos;
         const resp = await fetchJSON(url);
         if (resp.repos) {
-          reposCache = resp.repos;
+          reposCache   = resp.repos;
           lastRepoData = resp;
           renderRepoListPage(resp.repos, false, resp);
         }
@@ -759,7 +802,7 @@
     currentMode = urlState.mode || "branch";
     if (urlState.base) currentBase = urlState.base;
 
-    document.getElementById("btn-back").onclick = () => {
+    dom.btnBack.onclick = () => {
       if (reposCache) renderRepoListPage(reposCache);
     };
 
@@ -780,8 +823,6 @@
       }
     });
 
-    const loading = document.getElementById("loading");
-
     let repos = null;
     try {
       repos = await loadWorkspace();
@@ -789,7 +830,7 @@
       // API unavailable or not workspace — fall through to single repo mode.
     }
 
-    loading.style.display = "none";
+    dom.loading.style.display = "none";
 
     if (repos) {
       // Workspace mode: honour direct URL like /repos/name or /repos/name/worktrees/wt.
@@ -805,11 +846,11 @@
     // Single repo mode.
     showDiffView();
 
-    // Load branches for base dropdown.
+    // Load branches for the base dropdown.
     try {
-      const branchData = await loadBranches(null);
-      const branches = branchData.branches || [];
-      const defaultBranch = branchData.default || "main";
+      const branchData    = await loadBranches(null);
+      const branches      = branchData.branches || [];
+      const defaultBranch = branchData.default   || "main";
       if (!currentBase || !branches.includes(currentBase)) {
         currentBase = defaultBranch;
       }
