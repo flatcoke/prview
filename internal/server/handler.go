@@ -25,6 +25,7 @@ const contentTypeJSON = "application/json"
 // Diff modes used by the /api/diff endpoint and the frontend.
 const (
 	diffModeBranch      = "branch"
+	diffModeAll         = "all"
 	diffModeUncommitted = "uncommitted"
 )
 
@@ -418,7 +419,12 @@ func buildDiffArgs(cfg Config, r *http.Request, repoDir string) []string {
 
 	mode := r.URL.Query().Get("mode")
 	if mode == "" {
-		mode = diffModeBranch
+		mode = diffModeAll
+	}
+
+	base := r.URL.Query().Get("base")
+	if base == "" {
+		base = git.DefaultBranch(repoDir)
 	}
 
 	switch mode {
@@ -430,12 +436,10 @@ func buildDiffArgs(cfg Config, r *http.Request, repoDir string) []string {
 			return []string{ref}
 		}
 		return nil // plain git diff
-	default: // diffModeBranch
-		base := r.URL.Query().Get("base")
-		if base == "" {
-			base = git.DefaultBranch(repoDir)
-		}
+	case diffModeBranch:
 		return []string{base + "...HEAD"}
+	default: // diffModeAll — committed + uncommitted vs base
+		return []string{base}
 	}
 }
 

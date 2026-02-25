@@ -37,6 +37,7 @@
     lblShowHidden:        "lbl-show-hidden",
     chkShowHidden:        "chk-show-hidden",
     btnModeBranch:        "btn-mode-branch",
+    btnModeAll:           "btn-mode-all",
     btnModeUncommitted:   "btn-mode-uncommitted",
     liveDot:              "live-dot",
     btnUnified:           "btn-unified",
@@ -58,7 +59,7 @@
   let currentBranch   = null;
   let reposCache      = null;
   let currentBase     = null;
-  let currentMode     = "branch"; // "branch" | "uncommitted"
+  let currentMode     = "all"; // "branch" | "all" | "uncommitted"
 
   /** Active WebSocket manager — holds the current live connection. */
   let wsManager = null;
@@ -87,7 +88,7 @@
     const params   = new URLSearchParams(window.location.search);
     const worktreeName = params.get("worktree") || null;
     const base         = params.get("base") || null;
-    const mode         = params.get("mode") || "branch";
+    const mode         = params.get("mode") || "all";
 
     // /repos/{repoName}/branches/{currentBranch}
     const bm = pathname.match(/^\/repos\/(.+)\/branches\/([^/]+)$/);
@@ -107,7 +108,7 @@
 
     const params = new URLSearchParams();
     if (worktreeName) params.set("worktree", worktreeName);
-    if (currentMode === "branch" && currentBase) params.set("base", currentBase);
+    if (currentMode !== "uncommitted" && currentBase) params.set("base", currentBase);
     if (currentMode !== "branch") params.set("mode", currentMode);
     const qs = params.toString() ? "?" + params.toString() : "";
     return path + qs;
@@ -118,7 +119,7 @@
     if (repoName)     params.set("repo", repoName);
     if (worktreeName) params.set("worktree", worktreeName);
     params.set("mode", currentMode);
-    if (currentMode === "branch" && currentBase) params.set("base", currentBase);
+    if (currentMode !== "uncommitted" && currentBase) params.set("base", currentBase);
     return API.diff + "?" + params.toString();
   }
 
@@ -359,13 +360,13 @@
 
   /** syncModeToggle updates button active states and shows/hides the base-branch control. */
   function syncModeToggle() {
-    const isBranch = currentMode === "branch";
-    dom.btnModeBranch.classList.toggle("active", isBranch);
-    dom.btnModeUncommitted.classList.toggle("active", !isBranch);
-    if (isBranch) {
-      showBranchControl();
-    } else {
+    dom.btnModeBranch.classList.toggle("active", currentMode === "branch");
+    dom.btnModeAll.classList.toggle("active", currentMode === "all");
+    dom.btnModeUncommitted.classList.toggle("active", currentMode === "uncommitted");
+    if (currentMode === "uncommitted") {
       hideBranchControl();
+    } else {
+      showBranchControl();
     }
   }
 
@@ -764,20 +765,16 @@
   // ── Mode toggle ──
 
   function setupModeToggle() {
-    dom.btnModeBranch.onclick = () => {
-      if (currentMode === "branch") return;
-      currentMode = "branch";
+    const handler = (mode) => () => {
+      if (currentMode === mode) return;
+      currentMode = mode;
       syncModeToggle();
       updateURL(false);
       fetchAndRenderDiff();
     };
-    dom.btnModeUncommitted.onclick = () => {
-      if (currentMode === "uncommitted") return;
-      currentMode = "uncommitted";
-      syncModeToggle();
-      updateURL(false);
-      fetchAndRenderDiff();
-    };
+    dom.btnModeBranch.onclick      = handler("branch");
+    dom.btnModeAll.onclick         = handler("all");
+    dom.btnModeUncommitted.onclick = handler("uncommitted");
   }
 
   // ── Close all open menus ──
@@ -822,7 +819,7 @@
 
     // Read URL state at page load.
     const urlState = parseURLState();
-    currentMode = urlState.mode || "branch";
+    currentMode = urlState.mode || "all";
     if (urlState.base) currentBase = urlState.base;
 
     dom.btnBack.onclick = () => {
@@ -832,7 +829,7 @@
     window.addEventListener("popstate", (e) => {
       if (e.state && e.state.repo) {
         currentBase = e.state.base || null;
-        currentMode = e.state.mode || "branch";
+        currentMode = e.state.mode || "all";
         selectRepo(e.state.repo, e.state.worktree || null, e.state.base, e.state.mode);
       } else if (reposCache) {
         renderRepoListPage(reposCache, false);
@@ -840,7 +837,7 @@
         // Single-repo mode: restore mode/base from URL then re-fetch.
         const state = parseURLState();
         currentBase = state.base;
-        currentMode = state.mode || "branch";
+        currentMode = state.mode || "all";
         syncModeToggle();
         fetchAndRenderDiff();
       }
