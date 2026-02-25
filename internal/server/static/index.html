@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>prview</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="header">
+    <div class="header-left">
+      <h1>prview</h1>
+      <span id="stats" class="stats"></span>
+    </div>
+    <div class="header-right">
+      <button id="btn-unified" class="view-btn active" data-view="line-by-line">Unified</button>
+      <button id="btn-split" class="view-btn" data-view="side-by-side">Split</button>
+    </div>
+  </header>
+  <div id="container">
+    <aside id="sidebar">
+      <div class="sidebar-header">Files</div>
+      <ul id="file-list"></ul>
+    </aside>
+    <main id="diff-container">
+      <div id="empty-state">
+        <p>No changes detected.</p>
+      </div>
+    </main>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
