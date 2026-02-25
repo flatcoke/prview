@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,6 +130,48 @@ func gitDirty(dir string) bool {
 		return false
 	}
 	return len(strings.TrimSpace(string(out))) > 0
+}
+
+// ListBranches returns local branch names for a git repository.
+// If repoDir is empty, git runs in the current working directory.
+func ListBranches(repoDir string) ([]string, error) {
+	var cmd *exec.Cmd
+	if repoDir != "" {
+		cmd = exec.Command("git", "-C", repoDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	} else {
+		cmd = exec.Command("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git for-each-ref failed: %w", err)
+	}
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
+}
+
+// DefaultBranch returns "main" if it exists in the repo, "master" if it exists,
+// or the first branch found. Falls back to "main" if nothing is found.
+func DefaultBranch(repoDir string) string {
+	branches, err := ListBranches(repoDir)
+	if err != nil || len(branches) == 0 {
+		return "main"
+	}
+	for _, b := range branches {
+		if b == "main" {
+			return b
+		}
+	}
+	for _, b := range branches {
+		if b == "master" {
+			return b
+		}
+	}
+	return branches[0]
 }
 
 // DiffInRepo runs git diff in a specific repository directory.

@@ -61,6 +61,43 @@ func New(cfg Config) http.Handler {
 		staticHandler.ServeHTTP(w, r)
 	})
 
+	// Branches API endpoint.
+	mux.HandleFunc("/api/branches", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		repoName := r.URL.Query().Get("repo")
+		if repoName != "" {
+			repoDir, ok := safeRepoPath(cfg.WorkDir, repoName)
+			if !ok {
+				http.Error(w, `{"error": "invalid repo name"}`, http.StatusBadRequest)
+				return
+			}
+			if !git.IsGitRepo(repoDir) {
+				http.Error(w, `{"error": "not a git repository"}`, http.StatusNotFound)
+				return
+			}
+			branches, err := git.ListBranches(repoDir)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"branches": branches,
+				"default":  git.DefaultBranch(repoDir),
+			})
+			return
+		}
+		// Single-repo mode.
+		branches, err := git.ListBranches("")
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"branches": branches,
+			"default":  git.DefaultBranch(""),
+		})
+	})
+
 	// Worktrees API endpoint.
 	mux.HandleFunc("/api/worktrees", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -139,7 +176,7 @@ func New(cfg Config) http.Handler {
 				}
 			}
 
-			args := buildDiffArgs(cfg, r)
+			args := buildDiffArgs(cfg, r, diffDir)
 			result, err := git.DiffInRepo(diffDir, args)
 			if err != nil {
 				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
@@ -150,7 +187,7 @@ func New(cfg Config) http.Handler {
 		}
 
 		// Single repo mode.
-		args := buildDiffArgs(cfg, r)
+		args := buildDiffArgs(cfg, r, "")
 		result, err := git.Diff(args)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
@@ -282,21 +319,39 @@ func resolveWatchDir(cfg Config, r *http.Request) (string, bool) {
 	return "", false
 }
 
-func buildDiffArgs(cfg Config, r *http.Request) []string {
-	var args []string
-
-	staged := cfg.Staged || r.URL.Query().Get("staged") == "true"
-	all := cfg.All || r.URL.Query().Get("all") == "true"
-
-	if ref := r.URL.Query().Get("ref"); ref != "" {
-		args = append(args, ref)
-	} else if len(cfg.RefArgs) > 0 {
-		args = append(args, cfg.RefArgs...)
-	} else if all {
-		args = append(args, "HEAD")
-	} else if staged {
-		args = append(args, "--cached")
+// buildDiffArgs builds git diff arguments based on config, request params, and repo dir.
+// repoDir is empty in single-repo mode (git runs in CWD).
+func buildDiffArgs(cfg Config, r *http.Request, repoDir string) []string {
+	// CLI launch-time overrides take priority.
+	if len(cfg.RefArgs) > 0 {
+		return cfg.RefArgs
+	}
+	if cfg.Staged {
+		return []string{"--cached"}
+	}
+	if cfg.All {
+		return []string{"HEAD"}
 	}
 
-	return args
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "branch"
+	}
+
+	switch mode {
+	case "uncommitted":
+		if r.URL.Query().Get("staged") == "true" {
+			return []string{"--cached"}
+		}
+		if ref := r.URL.Query().Get("ref"); ref != "" {
+			return []string{ref}
+		}
+		return nil // plain git diff
+	default: // "branch"
+		base := r.URL.Query().Get("base")
+		if base == "" {
+			base = git.DefaultBranch(repoDir)
+		}
+		return []string{base + "...HEAD"}
+	}
 }

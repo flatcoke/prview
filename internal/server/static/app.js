@@ -7,6 +7,8 @@
   let currentRepo = null;
   let currentWorktree = null;
   let reposCache = null;
+  let currentBase = null;
+  let currentMode = "branch"; // "branch" | "uncommitted"
 
   // Active WebSocket manager — holds the current live connection.
   let wsManager = null;
@@ -17,6 +19,71 @@
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return resp.json();
+  }
+
+  // ── URL state ──
+
+  function parseURLState() {
+    const pathname = window.location.pathname;
+    const params = new URLSearchParams(window.location.search);
+    const base = params.get("base") || null;
+    const mode = params.get("mode") || "branch";
+
+    const m = pathname.match(/^\/repos\/(.+)$/);
+    if (!m) return { repoName: null, worktreeName: null, base, mode };
+
+    const rest = m[1];
+    const wtm = rest.match(/^(.+)\/worktrees\/([^/]+)$/);
+    if (wtm) return { repoName: wtm[1], worktreeName: wtm[2], base, mode };
+    return { repoName: rest, worktreeName: null, base, mode };
+  }
+
+  function buildPageURL(repoName, worktreeName) {
+    const params = new URLSearchParams();
+    if (currentMode !== "branch") params.set("mode", currentMode);
+    if (currentMode === "branch" && currentBase) params.set("base", currentBase);
+    const qs = params.toString() ? "?" + params.toString() : "";
+
+    if (!repoName) return "/" + qs;
+    let path = `/repos/${repoName}`;
+    if (worktreeName) path += `/worktrees/${worktreeName}`;
+    return path + qs;
+  }
+
+  function buildDiffUrl(repoName, worktreeName) {
+    const params = new URLSearchParams();
+    if (repoName) params.set("repo", repoName);
+    if (worktreeName) params.set("worktree", worktreeName);
+    params.set("mode", currentMode);
+    if (currentMode === "branch" && currentBase) params.set("base", currentBase);
+    return "/api/diff?" + params.toString();
+  }
+
+  function updateURL(push) {
+    const url = buildPageURL(currentRepo, currentWorktree);
+    const state = {
+      repo: currentRepo,
+      worktree: currentWorktree,
+      base: currentBase,
+      mode: currentMode,
+    };
+    if (push) history.pushState(state, "", url);
+    else history.replaceState(state, "", url);
+  }
+
+  // ── Diff fetching & rendering ──
+
+  async function fetchAndRenderDiff() {
+    setDiffLoading(currentRepo || "");
+    try {
+      const url = buildDiffUrl(currentRepo, currentWorktree);
+      diffData = await fetchJSON(url);
+      renderStats(diffData);
+      renderFileList(diffData);
+      renderDiff(diffData);
+    } catch (err) {
+      renderDiffError(err.message);
+    }
   }
 
   // ── WebSocket live refresh ──
@@ -95,13 +162,10 @@
     };
   }
 
-  // refreshDiff re-fetches the current diff (without touching the worktree bar)
-  // and re-renders stats, file list, and diff.
+  // refreshDiff re-fetches the current diff without touching UI chrome.
   async function refreshDiff() {
-    const repo = currentRepo;
-    const wt = currentWorktree;
     try {
-      const url = repo ? buildDiffUrl(repo, wt) : "/api/diff";
+      const url = buildDiffUrl(currentRepo, currentWorktree);
       const data = await fetchJSON(url);
       diffData = data;
       renderStats(data);
@@ -112,7 +176,6 @@
     }
   }
 
-  // stopWS tears down any active WebSocket connection.
   function stopWS() {
     if (wsManager) {
       wsManager.stop();
@@ -120,10 +183,56 @@
     }
   }
 
-  // startWS replaces the current WS manager with a new connection.
   function startWS(repo, worktree) {
     stopWS();
     wsManager = connectWS(repo, worktree);
+  }
+
+  // ── Branch controls ──
+
+  async function loadBranches(repoName) {
+    const url = repoName
+      ? `/api/branches?repo=${encodeURIComponent(repoName)}`
+      : "/api/branches";
+    return fetchJSON(url);
+  }
+
+  function renderBaseSelect(branches, selectedBranch) {
+    const sel = document.getElementById("base-select");
+    sel.innerHTML = "";
+    (branches || []).forEach((b) => {
+      const opt = document.createElement("option");
+      opt.value = b;
+      opt.textContent = b;
+      opt.selected = b === selectedBranch;
+      sel.appendChild(opt);
+    });
+    sel.value = selectedBranch || "";
+    sel.onchange = () => {
+      currentBase = sel.value;
+      updateURL(false);
+      fetchAndRenderDiff();
+    };
+  }
+
+  function showBranchControl() {
+    document.getElementById("base-branch-control").style.display = "";
+  }
+
+  function hideBranchControl() {
+    document.getElementById("base-branch-control").style.display = "none";
+  }
+
+  // syncModeToggle updates button active states and shows/hides base-branch-control.
+  function syncModeToggle() {
+    const isBranch = currentMode === "branch";
+    document.getElementById("btn-mode-branch").classList.toggle("active", isBranch);
+    document.getElementById("btn-mode-uncommitted").classList.toggle("active", !isBranch);
+    if (isBranch) {
+      showBranchControl();
+    } else {
+      hideBranchControl();
+    }
   }
 
   // ── Layout switching ──
@@ -139,6 +248,7 @@
     currentRepo = null;
     currentWorktree = null;
     hideWorktreeSelect();
+    hideBranchControl();
   }
 
   function showDiffView() {
@@ -152,6 +262,7 @@
     if (currentRepo) {
       document.getElementById("header-title").textContent = currentRepo;
     }
+    syncModeToggle();
   }
 
   // ── Worktree dropdown ──
@@ -245,27 +356,41 @@
 
   // ── Repo diff ──
 
-  async function selectRepo(repoName, initialWorktree) {
+  // selectRepo loads a repo view. initialBase/initialMode come from URL or popstate.
+  async function selectRepo(repoName, initialWorktree, initialBase, initialMode) {
     currentRepo = repoName;
     currentWorktree = null;
-
-    const url = initialWorktree
-      ? `/repos/${repoName}/worktrees/${initialWorktree}`
-      : `/repos/${repoName}`;
-    history.pushState({ repo: repoName, worktree: initialWorktree || null }, "", url);
+    if (initialMode) currentMode = initialMode;
 
     showDiffView();
     setDiffLoading(repoName);
 
-    // Fetch worktrees and determine which one to show.
-    let worktrees = [];
-    try {
-      const wtData = await fetchJSON(
-        `/api/worktrees?repo=${encodeURIComponent(repoName)}`
-      );
-      worktrees = wtData.worktrees || [];
-    } catch (_) {}
+    // Load branches and worktrees in parallel.
+    const [branchResult, worktreeResult] = await Promise.allSettled([
+      loadBranches(repoName),
+      fetchJSON(`/api/worktrees?repo=${encodeURIComponent(repoName)}`),
+    ]);
 
+    // Resolve base branch.
+    let branches = [];
+    let defaultBranch = "main";
+    if (branchResult.status === "fulfilled") {
+      branches = branchResult.value.branches || [];
+      defaultBranch = branchResult.value.default || "main";
+    }
+    if (initialBase && branches.includes(initialBase)) {
+      currentBase = initialBase;
+    } else {
+      currentBase = defaultBranch;
+    }
+    renderBaseSelect(branches, currentBase);
+    syncModeToggle();
+
+    // Resolve worktree.
+    let worktrees = [];
+    if (worktreeResult.status === "fulfilled") {
+      worktrees = worktreeResult.value.worktrees || [];
+    }
     let activeWt = null;
     if (worktrees.length > 1) {
       activeWt = initialWorktree || worktrees[0].name;
@@ -275,52 +400,30 @@
       hideWorktreeSelect();
     }
 
-    try {
-      const diffUrl = buildDiffUrl(repoName, activeWt);
-      diffData = await fetchJSON(diffUrl);
-      renderStats(diffData);
-      renderFileList(diffData);
-      renderDiff(diffData);
-    } catch (err) {
-      renderDiffError(err.message);
-    }
+    // Push history with fully resolved state.
+    history.pushState(
+      { repo: repoName, worktree: currentWorktree, base: currentBase, mode: currentMode },
+      "",
+      buildPageURL(repoName, currentWorktree)
+    );
 
-    // Start live refresh for this repo/worktree.
-    startWS(repoName, activeWt);
+    await fetchAndRenderDiff();
+    startWS(repoName, currentWorktree);
   }
 
   async function selectWorktree(repoName, worktreeName) {
     currentWorktree = worktreeName;
-    history.pushState(
-      { repo: repoName, worktree: worktreeName },
-      "",
-      `/repos/${repoName}/worktrees/${worktreeName}`
-    );
-
-    // Sync dropdown selection.
     document.getElementById("wt-select").value = worktreeName;
 
+    history.pushState(
+      { repo: repoName, worktree: worktreeName, base: currentBase, mode: currentMode },
+      "",
+      buildPageURL(repoName, worktreeName)
+    );
+
     setDiffLoading(repoName);
-    try {
-      const diffUrl = buildDiffUrl(repoName, worktreeName);
-      diffData = await fetchJSON(diffUrl);
-      renderStats(diffData);
-      renderFileList(diffData);
-      renderDiff(diffData);
-    } catch (err) {
-      renderDiffError(err.message);
-    }
-
-    // Switch live refresh to the new worktree.
+    await fetchAndRenderDiff();
     startWS(repoName, worktreeName);
-  }
-
-  function buildDiffUrl(repoName, worktreeName) {
-    let url = `/api/diff?repo=${encodeURIComponent(repoName)}`;
-    if (worktreeName) {
-      url += `&worktree=${encodeURIComponent(worktreeName)}`;
-    }
-    return url;
   }
 
   function setDiffLoading(repoName) {
@@ -435,24 +538,35 @@
     };
   }
 
-  // ── URL parsing ──
+  // ── Mode toggle ──
 
-  function parseRepoPath(pathname) {
-    const m = pathname.match(/^\/repos\/(.+)$/);
-    if (!m) return { repoName: null, worktreeName: null };
-    const rest = m[1];
-    // Check for worktree segment: /repos/{repoName}/worktrees/{worktreeName}
-    const wtm = rest.match(/^(.+)\/worktrees\/([^/]+)$/);
-    if (wtm) {
-      return { repoName: wtm[1], worktreeName: wtm[2] };
-    }
-    return { repoName: rest, worktreeName: null };
+  function setupModeToggle() {
+    document.getElementById("btn-mode-branch").onclick = () => {
+      if (currentMode === "branch") return;
+      currentMode = "branch";
+      syncModeToggle();
+      updateURL(false);
+      fetchAndRenderDiff();
+    };
+    document.getElementById("btn-mode-uncommitted").onclick = () => {
+      if (currentMode === "uncommitted") return;
+      currentMode = "uncommitted";
+      syncModeToggle();
+      updateURL(false);
+      fetchAndRenderDiff();
+    };
   }
 
   // ── Init ──
 
   async function init() {
     setupViewToggle();
+    setupModeToggle();
+
+    // Read URL state at page load.
+    const urlState = parseURLState();
+    currentMode = urlState.mode || "branch";
+    if (urlState.base) currentBase = urlState.base;
 
     document.getElementById("btn-back").onclick = () => {
       if (reposCache) renderRepoListPage(reposCache);
@@ -460,9 +574,18 @@
 
     window.addEventListener("popstate", (e) => {
       if (e.state && e.state.repo) {
-        selectRepo(e.state.repo, e.state.worktree || null);
+        currentBase = e.state.base || null;
+        currentMode = e.state.mode || "branch";
+        selectRepo(e.state.repo, e.state.worktree || null, e.state.base, e.state.mode);
       } else if (reposCache) {
         renderRepoListPage(reposCache, false);
+      } else {
+        // Single-repo mode: restore mode/base from URL then re-fetch.
+        const state = parseURLState();
+        currentBase = state.base;
+        currentMode = state.mode || "branch";
+        syncModeToggle();
+        fetchAndRenderDiff();
       }
     });
 
@@ -479,9 +602,9 @@
 
     if (repos) {
       // Workspace mode: honour direct URL like /repos/name or /repos/name/worktrees/wt.
-      const { repoName, worktreeName } = parseRepoPath(window.location.pathname);
+      const { repoName, worktreeName } = urlState;
       if (repoName && repos.some((r) => r.name === repoName)) {
-        await selectRepo(repoName, worktreeName);
+        await selectRepo(repoName, worktreeName, urlState.base, urlState.mode);
       } else {
         renderRepoListPage(repos, false);
       }
@@ -490,17 +613,22 @@
 
     // Single repo mode.
     showDiffView();
-    setDiffLoading("");
-    try {
-      diffData = await fetchJSON("/api/diff");
-      renderStats(diffData);
-      renderFileList(diffData);
-      renderDiff(diffData);
-    } catch (err) {
-      renderDiffError(err.message);
-    }
 
-    // Start live refresh for single-repo mode (no repo param).
+    // Load branches for base dropdown.
+    try {
+      const branchData = await loadBranches(null);
+      const branches = branchData.branches || [];
+      const defaultBranch = branchData.default || "main";
+      if (!currentBase || !branches.includes(currentBase)) {
+        currentBase = defaultBranch;
+      }
+      renderBaseSelect(branches, currentBase);
+    } catch (_) {}
+
+    syncModeToggle();
+    updateURL(false);
+
+    await fetchAndRenderDiff();
     startWS(null, null);
   }
 
