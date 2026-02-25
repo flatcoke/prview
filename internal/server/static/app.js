@@ -138,7 +138,7 @@
     document.getElementById("header-title").textContent = "prview";
     currentRepo = null;
     currentWorktree = null;
-    hideWorktreeBar();
+    hideWorktreeSelect();
   }
 
   function showDiffView() {
@@ -154,27 +154,26 @@
     }
   }
 
-  // ── Worktree bar ──
+  // ── Worktree dropdown ──
 
-  function renderWorktreeBar(worktrees, repoName, activeWorktreeName) {
-    const bar = document.getElementById("worktree-bar");
-    bar.innerHTML = "";
-
+  function renderWorktreeSelect(worktrees, repoName, activeWorktreeName) {
+    const sel = document.getElementById("wt-select");
+    sel.innerHTML = "";
     worktrees.forEach((wt) => {
-      const btn = document.createElement("button");
-      btn.className = "wt-tab" + (wt.name === activeWorktreeName ? " active" : "");
-      btn.textContent = wt.name;
-      btn.onclick = () => selectWorktree(repoName, wt.name);
-      bar.appendChild(btn);
+      const opt = document.createElement("option");
+      opt.value = wt.name;
+      opt.textContent = wt.branch || wt.name;
+      opt.selected = wt.name === activeWorktreeName;
+      sel.appendChild(opt);
     });
-
-    bar.style.display = "flex";
-    document.getElementById("container").classList.add("has-worktree-bar");
+    sel.onchange = () => selectWorktree(repoName, sel.value);
+    sel.style.display = "";
   }
 
-  function hideWorktreeBar() {
-    document.getElementById("worktree-bar").style.display = "none";
-    document.getElementById("container").classList.remove("has-worktree-bar");
+  function hideWorktreeSelect() {
+    const sel = document.getElementById("wt-select");
+    sel.style.display = "none";
+    sel.innerHTML = "";
   }
 
   // ── Workspace / repo list ──
@@ -271,9 +270,9 @@
     if (worktrees.length > 1) {
       activeWt = initialWorktree || worktrees[0].name;
       currentWorktree = activeWt;
-      renderWorktreeBar(worktrees, repoName, activeWt);
+      renderWorktreeSelect(worktrees, repoName, activeWt);
     } else {
-      hideWorktreeBar();
+      hideWorktreeSelect();
     }
 
     try {
@@ -298,10 +297,8 @@
       `/repos/${repoName}/worktrees/${worktreeName}`
     );
 
-    // Update active tab.
-    document.querySelectorAll(".wt-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.textContent === worktreeName);
-    });
+    // Sync dropdown selection.
+    document.getElementById("wt-select").value = worktreeName;
 
     setDiffLoading(repoName);
     try {
