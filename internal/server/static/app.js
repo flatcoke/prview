@@ -54,6 +54,7 @@
   }
 
   function renderRepoListPage(repos) {
+    history.pushState({}, "", "/");
     showRepoList();
 
     const container = document.getElementById("repo-list-container");
@@ -105,6 +106,7 @@
 
   async function selectRepo(repoName) {
     currentRepo = repoName;
+    history.pushState({ repo: repoName }, "", `/${repoName}`);
     showDiffView();
 
     const stats = document.getElementById("stats");
@@ -245,8 +247,24 @@
       if (reposCache) renderRepoListPage(reposCache);
     };
 
+    window.addEventListener("popstate", (e) => {
+      if (e.state && e.state.repo) {
+        selectRepo(e.state.repo);
+      } else if (reposCache) {
+        showRepoList();
+        currentRepo = null;
+      }
+    });
+
     const ws = await checkWorkspace();
-    if (ws) return;
+    if (ws) {
+      // Check URL for direct repo access: /repoName
+      const path = window.location.pathname.replace(/^\//, "");
+      if (path && reposCache.some((r) => r.name === path)) {
+        await selectRepo(path);
+      }
+      return;
+    }
 
     showDiffView();
     diffData = await fetchJSON("/api/diff");
