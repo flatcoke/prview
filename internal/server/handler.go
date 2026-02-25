@@ -137,6 +137,7 @@ func (s *srv) handleBranches(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"branches": branches,
 		"default":  git.DefaultBranch(repoDir),
+		"current":  git.CurrentBranch(repoDir),
 	})
 }
 

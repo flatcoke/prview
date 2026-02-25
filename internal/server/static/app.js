@@ -55,6 +55,7 @@
   let isWorkspace     = false;
   let currentRepo     = null;
   let currentWorktree = null;
+  let currentBranch   = null;
   let reposCache      = null;
   let currentBase     = null;
   let currentMode     = "branch"; // "branch" | "uncommitted"
@@ -84,27 +85,31 @@
   function parseURLState() {
     const pathname = window.location.pathname;
     const params   = new URLSearchParams(window.location.search);
-    const base     = params.get("base") || null;
-    const mode     = params.get("mode") || "branch";
+    const worktreeName = params.get("worktree") || null;
+    const base         = params.get("base") || null;
+    const mode         = params.get("mode") || "branch";
 
+    // /repos/{repoName}/branches/{currentBranch}
+    const bm = pathname.match(/^\/repos\/(.+)\/branches\/([^/]+)$/);
+    if (bm) return { repoName: bm[1], worktreeName, base, mode, branch: bm[2] };
+
+    // /repos/{repoName}
     const m = pathname.match(/^\/repos\/(.+)$/);
-    if (!m) return { repoName: null, worktreeName: null, base, mode };
+    if (m) return { repoName: m[1], worktreeName, base, mode, branch: null };
 
-    const rest = m[1];
-    const wtm  = rest.match(/^(.+)\/worktrees\/([^/]+)$/);
-    if (wtm) return { repoName: wtm[1], worktreeName: wtm[2], base, mode };
-    return { repoName: rest, worktreeName: null, base, mode };
+    return { repoName: null, worktreeName, base, mode, branch: null };
   }
 
   function buildPageURL(repoName, worktreeName) {
-    const params = new URLSearchParams();
-    if (currentMode !== "branch") params.set("mode", currentMode);
-    if (currentMode === "branch" && currentBase) params.set("base", currentBase);
-    const qs = params.toString() ? "?" + params.toString() : "";
-
-    if (!repoName) return "/" + qs;
+    if (!repoName) return "/";
     let path = `/repos/${repoName}`;
-    if (worktreeName) path += `/worktrees/${worktreeName}`;
+    if (currentBranch) path += `/branches/${currentBranch}`;
+
+    const params = new URLSearchParams();
+    if (worktreeName) params.set("worktree", worktreeName);
+    if (currentMode === "branch" && currentBase) params.set("base", currentBase);
+    if (currentMode !== "branch") params.set("mode", currentMode);
+    const qs = params.toString() ? "?" + params.toString() : "";
     return path + qs;
   }
 
@@ -119,7 +124,7 @@
 
   function updateURL(push) {
     const url   = buildPageURL(currentRepo, currentWorktree);
-    const state = { repo: currentRepo, worktree: currentWorktree, base: currentBase, mode: currentMode };
+    const state = { repo: currentRepo, worktree: currentWorktree, base: currentBase, mode: currentMode, branch: currentBranch };
     if (push) history.pushState(state, "", url);
     else      history.replaceState(state, "", url);
   }
@@ -600,6 +605,11 @@
       branches      = branchResult.value.branches || [];
       defaultBranch = branchResult.value.default  || "main";
     }
+    // Resolve current branch from API or repo list cache.
+    currentBranch = branchResult.status === "fulfilled" && branchResult.value.current
+      ? branchResult.value.current
+      : (reposCache && reposCache.find(r => r.name === repoName)?.branch) || defaultBranch;
+
     currentBase = (initialBase && branches.includes(initialBase)) ? initialBase : defaultBranch;
     renderBaseSelect(branches, currentBase);
     updateDeleteBranchVisibility();
