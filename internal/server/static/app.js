@@ -8,6 +8,9 @@
   let currentWorktree = null;
   let reposCache = null;
 
+  // Active WebSocket manager — holds the current live connection.
+  let wsManager = null;
+
   // ── HTTP ──
 
   async function fetchJSON(url) {
@@ -16,9 +19,117 @@
     return resp.json();
   }
 
+  // ── WebSocket live refresh ──
+
+  function setLiveIndicator(state) {
+    const dot = document.getElementById("live-dot");
+    if (!dot) return;
+    dot.className = "live-dot" + (state ? " " + state : "");
+  }
+
+  // connectWS opens a WebSocket to /ws with optional repo/worktree params and
+  // returns a manager object with a stop() method.
+  function connectWS(repo, worktree) {
+    let ws = null;
+    let stopped = false;
+    let reconnectTimer = null;
+    let reconnectDelay = 1000;
+
+    function buildURL() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      let url = `${proto}//${location.host}/ws`;
+      if (repo) {
+        url += `?repo=${encodeURIComponent(repo)}`;
+        if (worktree) url += `&worktree=${encodeURIComponent(worktree)}`;
+      }
+      return url;
+    }
+
+    function connect() {
+      if (stopped) return;
+      ws = new WebSocket(buildURL());
+
+      ws.onopen = function () {
+        reconnectDelay = 1000;
+        setLiveIndicator("connected");
+      };
+
+      ws.onmessage = function (event) {
+        let msg;
+        try {
+          msg = JSON.parse(event.data);
+        } catch (_) {
+          return;
+        }
+        if (msg.type === "refresh") {
+          refreshDiff();
+        }
+      };
+
+      ws.onclose = function () {
+        if (stopped) return;
+        setLiveIndicator("reconnecting");
+        reconnectTimer = setTimeout(function () {
+          reconnectDelay = Math.min(reconnectDelay * 2, 16000);
+          connect();
+        }, reconnectDelay);
+      };
+
+      ws.onerror = function () {
+        // onclose will fire next and handle reconnection.
+      };
+    }
+
+    connect();
+
+    return {
+      stop: function () {
+        stopped = true;
+        clearTimeout(reconnectTimer);
+        if (ws) {
+          ws.onclose = null; // prevent reconnect loop on deliberate close
+          ws.close();
+        }
+        setLiveIndicator("");
+      },
+    };
+  }
+
+  // refreshDiff re-fetches the current diff (without touching the worktree bar)
+  // and re-renders stats, file list, and diff.
+  async function refreshDiff() {
+    const repo = currentRepo;
+    const wt = currentWorktree;
+    try {
+      const url = repo ? buildDiffUrl(repo, wt) : "/api/diff";
+      const data = await fetchJSON(url);
+      diffData = data;
+      renderStats(data);
+      renderFileList(data);
+      renderDiff(data);
+    } catch (_) {
+      // Silently ignore refresh errors — stale view is better than error flash.
+    }
+  }
+
+  // stopWS tears down any active WebSocket connection.
+  function stopWS() {
+    if (wsManager) {
+      wsManager.stop();
+      wsManager = null;
+    }
+  }
+
+  // startWS replaces the current WS manager with a new connection.
+  function startWS(repo, worktree) {
+    stopWS();
+    wsManager = connectWS(repo, worktree);
+  }
+
   // ── Layout switching ──
 
   function showRepoList() {
+    stopWS();
     document.getElementById("sidebar").style.display = "none";
     document.getElementById("diff-container").style.display = "none";
     document.getElementById("repo-list-container").style.display = "flex";
@@ -174,6 +285,9 @@
     } catch (err) {
       renderDiffError(err.message);
     }
+
+    // Start live refresh for this repo/worktree.
+    startWS(repoName, activeWt);
   }
 
   async function selectWorktree(repoName, worktreeName) {
@@ -199,6 +313,9 @@
     } catch (err) {
       renderDiffError(err.message);
     }
+
+    // Switch live refresh to the new worktree.
+    startWS(repoName, worktreeName);
   }
 
   function buildDiffUrl(repoName, worktreeName) {
@@ -226,9 +343,7 @@
 
   function renderStats(data) {
     const nFiles = data.files ? data.files.length : 0;
-    const prefix = "";
     document.getElementById("stats").innerHTML =
-      prefix +
       `${nFiles} file${nFiles !== 1 ? "s" : ""} changed &nbsp;` +
       `<span class="add">+${data.additions || 0}</span> &nbsp;` +
       `<span class="del">-${data.deletions || 0}</span>`;
@@ -387,6 +502,9 @@
     } catch (err) {
       renderDiffError(err.message);
     }
+
+    // Start live refresh for single-repo mode (no repo param).
+    startWS(null, null);
   }
 
   if (document.readyState === "loading") {

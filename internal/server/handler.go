@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -9,8 +10,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/flatcoke/prview/internal/git"
+	"github.com/flatcoke/prview/internal/watcher"
 )
 
 //go:embed static/*
@@ -24,6 +29,10 @@ type Config struct {
 	RefArgs   []string
 	WorkDir   string // The directory prview was launched in
 	Workspace bool   // True if workspace mode (multiple repos)
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 // New creates and returns a configured http.ServeMux.
@@ -150,6 +159,74 @@ func New(cfg Config) http.Handler {
 		json.NewEncoder(w).Encode(result)
 	})
 
+	// WebSocket endpoint for real-time diff refresh.
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("ws upgrade: %v", err)
+			return
+		}
+
+		// Resolve the directory to watch.
+		watchDir, ok := resolveWatchDir(cfg, r)
+		if !ok {
+			_ = conn.WriteJSON(map[string]string{"type": "error", "message": "invalid repo"})
+			conn.Close()
+			return
+		}
+
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		// refreshCh is buffered so the watcher goroutine never blocks.
+		// Capacity 1 provides natural deduplication: at most one refresh queued.
+		refreshCh := make(chan struct{}, 1)
+
+		stopWatch, err := watcher.Watch(ctx, watchDir, 300*time.Millisecond, func() {
+			select {
+			case refreshCh <- struct{}{}:
+			default: // a refresh is already pending — drop the duplicate
+			}
+		})
+		if err != nil {
+			log.Printf("ws watcher: %v", err)
+			_ = conn.WriteJSON(map[string]string{"type": "error", "message": "watcher failed"})
+			conn.Close()
+			return
+		}
+		defer stopWatch()
+
+		// readErr receives an error the moment the client disconnects or sends
+		// invalid data. gorilla/websocket allows one concurrent reader and one
+		// concurrent writer — the reader lives in this goroutine, all writes
+		// happen in the select loop below, ensuring serialised access.
+		readErr := make(chan error, 1)
+		go func() {
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					readErr <- err
+					return
+				}
+			}
+		}()
+
+		defer conn.Close()
+
+		// Main loop: ONLY this goroutine writes to conn.
+		for {
+			select {
+			case <-refreshCh:
+				if err := conn.WriteJSON(map[string]string{"type": "refresh"}); err != nil {
+					return
+				}
+			case <-readErr:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
+
 	return mux
 }
 
@@ -169,6 +246,40 @@ func safeRepoPath(workDir, repoName string) (string, bool) {
 		return "", false
 	}
 	return repoDir, true
+}
+
+// resolveWatchDir returns the filesystem directory to watch for a WebSocket
+// connection, based on the repo and worktree query parameters.
+func resolveWatchDir(cfg Config, r *http.Request) (string, bool) {
+	repoName := r.URL.Query().Get("repo")
+	if repoName == "" {
+		// Single-repo mode: watch the working directory.
+		return cfg.WorkDir, true
+	}
+
+	repoDir, ok := safeRepoPath(cfg.WorkDir, repoName)
+	if !ok {
+		return "", false
+	}
+	if !git.IsGitRepo(repoDir) {
+		return "", false
+	}
+
+	worktreeName := r.URL.Query().Get("worktree")
+	if worktreeName == "" {
+		return repoDir, true
+	}
+
+	worktrees, err := git.GitWorktrees(repoDir)
+	if err != nil {
+		return "", false
+	}
+	for _, wt := range worktrees {
+		if wt.Name == worktreeName {
+			return wt.Path, true
+		}
+	}
+	return "", false
 }
 
 func buildDiffArgs(cfg Config, r *http.Request) []string {
