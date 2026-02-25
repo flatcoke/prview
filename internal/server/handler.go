@@ -24,7 +24,7 @@ const contentTypeJSON = "application/json"
 
 // Diff modes used by the /api/diff endpoint and the frontend.
 const (
-	diffModeBranch      = "branch"
+	diffModeBranch      = "branchdiff"
 	diffModeUncommitted = "uncommitted"
 )
 
