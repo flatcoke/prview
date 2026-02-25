@@ -185,16 +185,13 @@
     container.innerHTML = "";
     container.appendChild(targetEl);
 
-    const config = {
+    const html = Diff2Html.html(data.rawDiff, {
       drawFileList: false,
       matching: "lines",
       outputFormat: currentView,
-      highlight: true,
       colorScheme: "dark",
-    };
-
-    const ui = new Diff2HtmlUI(targetEl, data.rawDiff, config);
-    ui.draw();
+    });
+    targetEl.innerHTML = html;
 
     const headers = container.querySelectorAll(".d2h-file-header");
     headers.forEach((header, idx) => {
