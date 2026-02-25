@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/flatcoke/prview/internal/git"
 )
@@ -16,10 +18,12 @@ var staticFS embed.FS
 
 // Config holds server configuration.
 type Config struct {
-	Port    int
-	Staged  bool
-	All     bool
-	RefArgs []string
+	Port      int
+	Staged    bool
+	All       bool
+	RefArgs   []string
+	WorkDir   string // The directory prview was launched in
+	Workspace bool   // True if workspace mode (multiple repos)
 }
 
 // New creates and returns a configured http.ServeMux.
@@ -33,16 +37,56 @@ func New(cfg Config) http.Handler {
 	}
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
+	// Workspace mode: list repos
+	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if !cfg.Workspace {
+			json.NewEncoder(w).Encode(map[string]interface{}{"workspace": false, "repos": []interface{}{}})
+			return
+		}
+		repos, err := git.DiscoverRepos(cfg.WorkDir)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"workspace": true, "repos": repos})
+	})
+
 	// API endpoint
 	mux.HandleFunc("/api/diff", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		repoName := r.URL.Query().Get("repo")
+
+		// If workspace mode and a repo is specified, diff within that repo
+		if cfg.Workspace && repoName != "" {
+			// Sanitize: prevent directory traversal
+			if strings.Contains(repoName, "/") || strings.Contains(repoName, "..") {
+				http.Error(w, `{"error": "invalid repo name"}`, http.StatusBadRequest)
+				return
+			}
+			repoDir := filepath.Join(cfg.WorkDir, repoName)
+			if !git.IsGitRepo(repoDir) {
+				http.Error(w, `{"error": "not a git repository"}`, http.StatusBadRequest)
+				return
+			}
+			args := buildDiffArgs(cfg, r)
+			result, err := git.DiffInRepo(repoDir, args)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+
+		// Single repo mode
 		args := buildDiffArgs(cfg, r)
 		result, err := git.Diff(args)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	})
 
@@ -52,7 +96,6 @@ func New(cfg Config) http.Handler {
 func buildDiffArgs(cfg Config, r *http.Request) []string {
 	var args []string
 
-	// Query param overrides
 	staged := cfg.Staged || r.URL.Query().Get("staged") == "true"
 	all := cfg.All || r.URL.Query().Get("all") == "true"
 
