@@ -514,11 +514,13 @@
 
         if (action === "clear") {
           if (!confirm(`Clear all changes in "${repoName}"? This will discard uncommitted modifications.`)) return;
+          fadeOutRow(tr);
           try {
             await repoActionAndReload(`${API.clear}?repo=${encodeURIComponent(repoName)}`, "POST");
           } catch (err) { alert("Error: " + err.message); }
         } else if (action === "hide") {
           if (!confirm(`Hide "${repoName}" from the workspace list?`)) return;
+          fadeOutRow(tr);
           try {
             await repoActionAndReload(`${API.hide}?repo=${encodeURIComponent(repoName)}`, "POST");
           } catch (err) { alert("Error: " + err.message); }
@@ -546,6 +548,17 @@
    * repoActionAndReload sends a request to url, then re-fetches and re-renders
    * the repo list. Returns false if the server returned an error.
    */
+  /**
+   * fadeOutRow applies a CSS fade+collapse animation to a table row.
+   * The row is removed from the DOM after the transition completes.
+   */
+  function fadeOutRow(row) {
+    row.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+    row.style.opacity    = "0";
+    row.style.transform  = "translateX(-20px)";
+    row.addEventListener("transitionend", () => row.remove(), { once: true });
+  }
+
   async function repoActionAndReload(url, method) {
     const resp = await fetch(url, { method });
     if (!resp.ok) {

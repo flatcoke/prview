@@ -193,6 +193,7 @@ func DefaultBranch(repoDir string) string {
 }
 
 // ClearRepo resets all changes in a repo (git checkout . + git clean -fd).
+// It also resets submodules recursively so nested dirty state is cleared.
 func ClearRepo(repoDir string) error {
 	if out, err := exec.Command("git", "-C", repoDir, "checkout", ".").CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout: %s", strings.TrimSpace(string(out)))
@@ -200,6 +201,9 @@ func ClearRepo(repoDir string) error {
 	if out, err := exec.Command("git", "-C", repoDir, "clean", "-fd").CombinedOutput(); err != nil {
 		return fmt.Errorf("clean: %s", strings.TrimSpace(string(out)))
 	}
+	// Reset submodules recursively — ignore errors (repo may have no submodules).
+	_ = exec.Command("git", "-C", repoDir, "submodule", "foreach", "--recursive",
+		"git checkout . && git clean -fd").Run()
 	return nil
 }
 
