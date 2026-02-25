@@ -23,6 +23,7 @@
     document.getElementById("repo-list-container").style.display = "flex";
     document.getElementById("btn-back").style.display = "none";
     document.querySelector(".header-right").style.display = "none";
+    document.getElementById("header-title").textContent = "prview";
     currentRepo = null;
   }
 
@@ -34,6 +35,9 @@
       document.getElementById("btn-back").style.display = "";
     }
     document.querySelector(".header-right").style.display = "";
+    if (currentRepo) {
+      document.getElementById("header-title").textContent = currentRepo;
+    }
   }
 
   // ── Workspace / repo list ──
@@ -141,7 +145,7 @@
 
   function renderStats(data) {
     const nFiles = data.files ? data.files.length : 0;
-    const prefix = currentRepo ? `${currentRepo} — ` : "";
+    const prefix = "";
     document.getElementById("stats").innerHTML =
       prefix +
       `${nFiles} file${nFiles !== 1 ? "s" : ""} changed &nbsp;` +

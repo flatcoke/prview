@@ -16,31 +16,25 @@ type Repo struct {
 }
 
 // IsGitRepo checks if the given directory is a git repository.
+// Handles both regular repos (.git is a directory) and submodules (.git is a file).
 func IsGitRepo(dir string) bool {
-	gitDir := filepath.Join(dir, ".git")
-	info, err := os.Stat(gitDir)
-	if err != nil {
-		return false
-	}
-	return info.IsDir()
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
-// DiscoverRepos finds all git repositories recursively in subdirectories of dir.
-// Repo names are relative paths from dir, using forward slashes (e.g. "meta/web").
-// Hidden directories (starting with ".") are skipped.
-// Once a git repo is found, its subdirectories are not recursed into.
+// DiscoverRepos finds git repositories in subdirectories of dir.
+// It recurses into non-git directories to find nested repos (e.g. "group/repo"),
+// but stops recursing once a .git is found (submodules are not listed separately).
 func DiscoverRepos(dir string) ([]Repo, error) {
 	var repos []Repo
-	if err := discoverRecursive(dir, dir, &repos); err != nil {
-		return nil, err
-	}
+	discoverRecursive(dir, dir, &repos)
 	return repos, nil
 }
 
-func discoverRecursive(baseDir, currentDir string, repos *[]Repo) error {
+func discoverRecursive(baseDir, currentDir string, repos *[]Repo) {
 	entries, err := os.ReadDir(currentDir)
 	if err != nil {
-		return err
+		return
 	}
 
 	for _, entry := range entries {
@@ -55,22 +49,17 @@ func discoverRecursive(baseDir, currentDir string, repos *[]Repo) error {
 			if err != nil {
 				continue
 			}
-			repo := Repo{
-				Name: filepath.ToSlash(relPath),
-				Path: subdir,
-			}
-			repo.Branch = gitBranch(subdir)
-			repo.Dirty = gitDirty(subdir)
-			*repos = append(*repos, repo)
-			// Do not recurse into a git repo's subdirectories.
+			*repos = append(*repos, Repo{
+				Name:   filepath.ToSlash(relPath),
+				Path:   subdir,
+				Branch: gitBranch(subdir),
+				Dirty:  gitDirty(subdir),
+			})
+			// Stop here — don't recurse into git repo subdirectories.
 		} else {
-			// Not a git repo — recurse into it to find nested repos.
-			// Ignore errors for unreadable directories.
-			_ = discoverRecursive(baseDir, subdir, repos)
+			discoverRecursive(baseDir, subdir, repos)
 		}
 	}
-
-	return nil
 }
 
 func gitBranch(dir string) string {
