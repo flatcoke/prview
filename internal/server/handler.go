@@ -52,6 +52,31 @@ func New(cfg Config) http.Handler {
 		staticHandler.ServeHTTP(w, r)
 	})
 
+	// Worktrees API endpoint.
+	mux.HandleFunc("/api/worktrees", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		repoName := r.URL.Query().Get("repo")
+		if repoName == "" {
+			http.Error(w, `{"error": "repo parameter required"}`, http.StatusBadRequest)
+			return
+		}
+		repoDir, ok := safeRepoPath(cfg.WorkDir, repoName)
+		if !ok {
+			http.Error(w, `{"error": "invalid repo name"}`, http.StatusBadRequest)
+			return
+		}
+		if !git.IsGitRepo(repoDir) {
+			http.Error(w, `{"error": "not a git repository"}`, http.StatusNotFound)
+			return
+		}
+		worktrees, err := git.GitWorktrees(repoDir)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"worktrees": worktrees})
+	})
+
 	// Workspace mode: list repos.
 	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -83,8 +108,30 @@ func New(cfg Config) http.Handler {
 				http.Error(w, `{"error": "not a git repository"}`, http.StatusNotFound)
 				return
 			}
+
+			diffDir := repoDir
+			if worktreeName := r.URL.Query().Get("worktree"); worktreeName != "" {
+				worktrees, err := git.GitWorktrees(repoDir)
+				if err != nil {
+					http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+					return
+				}
+				found := false
+				for _, wt := range worktrees {
+					if wt.Name == worktreeName {
+						diffDir = wt.Path
+						found = true
+						break
+					}
+				}
+				if !found {
+					http.Error(w, `{"error": "worktree not found"}`, http.StatusNotFound)
+					return
+				}
+			}
+
 			args := buildDiffArgs(cfg, r)
-			result, err := git.DiffInRepo(repoDir, args)
+			result, err := git.DiffInRepo(diffDir, args)
 			if err != nil {
 				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
 				return

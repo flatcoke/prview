@@ -7,6 +7,59 @@ import (
 	"strings"
 )
 
+// Worktree represents a git worktree.
+type Worktree struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+	Head   string `json:"head"`
+}
+
+// GitWorktrees returns the list of worktrees for a git repository.
+func GitWorktrees(repoDir string) ([]Worktree, error) {
+	out, err := exec.Command("git", "-C", repoDir, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktrees(string(out)), nil
+}
+
+func parseWorktrees(raw string) []Worktree {
+	var worktrees []Worktree
+	blocks := strings.Split(strings.TrimSpace(raw), "\n\n")
+	for i, block := range blocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		var wt Worktree
+		for _, line := range strings.Split(block, "\n") {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				wt.Path = strings.TrimPrefix(line, "worktree ")
+			case strings.HasPrefix(line, "HEAD "):
+				wt.Head = strings.TrimPrefix(line, "HEAD ")
+			case strings.HasPrefix(line, "branch "):
+				branch := strings.TrimPrefix(line, "branch ")
+				wt.Branch = strings.TrimPrefix(branch, "refs/heads/")
+			}
+		}
+		if i == 0 {
+			// Primary worktree: name derived from branch name.
+			if wt.Branch != "" {
+				wt.Name = wt.Branch
+			} else {
+				wt.Name = "main"
+			}
+		} else {
+			// Linked worktrees: name is the last path segment.
+			wt.Name = filepath.Base(wt.Path)
+		}
+		worktrees = append(worktrees, wt)
+	}
+	return worktrees
+}
+
 // Repo represents a git repository found in the workspace.
 type Repo struct {
 	Name   string `json:"name"`

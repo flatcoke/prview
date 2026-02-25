@@ -5,6 +5,7 @@
   let diffData = null;
   let isWorkspace = false;
   let currentRepo = null;
+  let currentWorktree = null;
   let reposCache = null;
 
   // ── HTTP ──
@@ -25,6 +26,8 @@
     document.querySelector(".header-right").style.display = "none";
     document.getElementById("header-title").textContent = "prview";
     currentRepo = null;
+    currentWorktree = null;
+    hideWorktreeBar();
   }
 
   function showDiffView() {
@@ -38,6 +41,29 @@
     if (currentRepo) {
       document.getElementById("header-title").textContent = currentRepo;
     }
+  }
+
+  // ── Worktree bar ──
+
+  function renderWorktreeBar(worktrees, repoName, activeWorktreeName) {
+    const bar = document.getElementById("worktree-bar");
+    bar.innerHTML = "";
+
+    worktrees.forEach((wt) => {
+      const btn = document.createElement("button");
+      btn.className = "wt-tab" + (wt.name === activeWorktreeName ? " active" : "");
+      btn.textContent = wt.name;
+      btn.onclick = () => selectWorktree(repoName, wt.name);
+      bar.appendChild(btn);
+    });
+
+    bar.style.display = "flex";
+    document.getElementById("container").classList.add("has-worktree-bar");
+  }
+
+  function hideWorktreeBar() {
+    document.getElementById("worktree-bar").style.display = "none";
+    document.getElementById("container").classList.remove("has-worktree-bar");
   }
 
   // ── Workspace / repo list ──
@@ -109,23 +135,78 @@
 
   // ── Repo diff ──
 
-  async function selectRepo(repoName) {
+  async function selectRepo(repoName, initialWorktree) {
     currentRepo = repoName;
-    history.pushState({ repo: repoName }, "", `/repos/${repoName}`);
+    currentWorktree = null;
 
-    // Show diff view with loading state immediately — clears any previous diff.
+    const url = initialWorktree
+      ? `/repos/${repoName}/worktrees/${initialWorktree}`
+      : `/repos/${repoName}`;
+    history.pushState({ repo: repoName, worktree: initialWorktree || null }, "", url);
+
     showDiffView();
     setDiffLoading(repoName);
 
+    // Fetch worktrees and determine which one to show.
+    let worktrees = [];
     try {
-      const url = `/api/diff?repo=${encodeURIComponent(repoName)}`;
-      diffData = await fetchJSON(url);
+      const wtData = await fetchJSON(
+        `/api/worktrees?repo=${encodeURIComponent(repoName)}`
+      );
+      worktrees = wtData.worktrees || [];
+    } catch (_) {}
+
+    let activeWt = null;
+    if (worktrees.length > 1) {
+      activeWt = initialWorktree || worktrees[0].name;
+      currentWorktree = activeWt;
+      renderWorktreeBar(worktrees, repoName, activeWt);
+    } else {
+      hideWorktreeBar();
+    }
+
+    try {
+      const diffUrl = buildDiffUrl(repoName, activeWt);
+      diffData = await fetchJSON(diffUrl);
       renderStats(diffData);
       renderFileList(diffData);
       renderDiff(diffData);
     } catch (err) {
       renderDiffError(err.message);
     }
+  }
+
+  async function selectWorktree(repoName, worktreeName) {
+    currentWorktree = worktreeName;
+    history.pushState(
+      { repo: repoName, worktree: worktreeName },
+      "",
+      `/repos/${repoName}/worktrees/${worktreeName}`
+    );
+
+    // Update active tab.
+    document.querySelectorAll(".wt-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.textContent === worktreeName);
+    });
+
+    setDiffLoading(repoName);
+    try {
+      const diffUrl = buildDiffUrl(repoName, worktreeName);
+      diffData = await fetchJSON(diffUrl);
+      renderStats(diffData);
+      renderFileList(diffData);
+      renderDiff(diffData);
+    } catch (err) {
+      renderDiffError(err.message);
+    }
+  }
+
+  function buildDiffUrl(repoName, worktreeName) {
+    let url = `/api/diff?repo=${encodeURIComponent(repoName)}`;
+    if (worktreeName) {
+      url += `&worktree=${encodeURIComponent(worktreeName)}`;
+    }
+    return url;
   }
 
   function setDiffLoading(repoName) {
@@ -242,6 +323,20 @@
     };
   }
 
+  // ── URL parsing ──
+
+  function parseRepoPath(pathname) {
+    const m = pathname.match(/^\/repos\/(.+)$/);
+    if (!m) return { repoName: null, worktreeName: null };
+    const rest = m[1];
+    // Check for worktree segment: /repos/{repoName}/worktrees/{worktreeName}
+    const wtm = rest.match(/^(.+)\/worktrees\/([^/]+)$/);
+    if (wtm) {
+      return { repoName: wtm[1], worktreeName: wtm[2] };
+    }
+    return { repoName: rest, worktreeName: null };
+  }
+
   // ── Init ──
 
   async function init() {
@@ -253,7 +348,7 @@
 
     window.addEventListener("popstate", (e) => {
       if (e.state && e.state.repo) {
-        selectRepo(e.state.repo);
+        selectRepo(e.state.repo, e.state.worktree || null);
       } else if (reposCache) {
         renderRepoListPage(reposCache, false);
       }
@@ -271,11 +366,10 @@
     loading.style.display = "none";
 
     if (repos) {
-      // Workspace mode: honour direct URL like /repos/parent/child.
-      const match = window.location.pathname.match(/^\/repos\/(.+)$/);
-      const repoName = match ? match[1] : "";
+      // Workspace mode: honour direct URL like /repos/name or /repos/name/worktrees/wt.
+      const { repoName, worktreeName } = parseRepoPath(window.location.pathname);
       if (repoName && repos.some((r) => r.name === repoName)) {
-        await selectRepo(repoName);
+        await selectRepo(repoName, worktreeName);
       } else {
         renderRepoListPage(repos, false);
       }
