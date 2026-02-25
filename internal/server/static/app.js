@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  let currentView = "line-by-line";
+  let currentView = "side-by-side";
   let diffData = null;
   let isWorkspace = false;
   let currentRepo = null;
