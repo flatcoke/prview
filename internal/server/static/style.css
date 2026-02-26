@@ -616,3 +616,10 @@ header {
 .d2h-file-wrapper:first-child {
   margin-top: 0 !important;
 }
+
+/* Improve diff header contrast */
+.d2h-file-header {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+}
