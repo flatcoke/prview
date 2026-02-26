@@ -216,88 +216,90 @@ header {
   font-size: 12px !important;
 }
 
-/* Context lines — uniform background */
-.d2h-code-line-ctn,
-.d2h-code-side-line {
-  background: var(--bg-primary) !important;
+/*
+ * Row coloring strategy:
+ * Use high-specificity selectors to ensure EVERY td in a row
+ * gets the same flat background, overriding diff2html defaults.
+ */
+
+/* Base: all cells in diff table */
+.d2h-diff-table td {
   color: var(--text-primary) !important;
 }
 
-.d2h-code-line-prefix {
-  background: var(--bg-primary) !important;
-  color: var(--text-muted) !important;
-}
-
-/* Line numbers */
-.d2h-code-linenumber {
-  background: var(--bg-secondary) !important;
+/* Context rows: gutter slightly darker than code */
+.d2h-diff-table td.d2h-code-linenumber {
+  background-color: var(--bg-secondary) !important;
   color: var(--text-muted) !important;
   border-right: 1px solid var(--border) !important;
 }
-
-/* Ensure all td in diff rows get base background */
-.d2h-diff-tbody td {
-  background: var(--bg-primary) !important;
+.d2h-diff-table td.d2h-code-line-ctn,
+.d2h-diff-table td.d2h-code-side-line {
+  background-color: var(--bg-primary) !important;
 }
-.d2h-diff-tbody .d2h-code-linenumber {
-  background: var(--bg-secondary) !important;
-}
-
-/* Override linenumber background for ins/del rows to match content */
-.d2h-ins .d2h-code-linenumber,
-.d2h-diff-tbody tr.d2h-ins td.d2h-code-linenumber,
-tr.d2h-ins td {
-  background: #122117 !important;
-}
-.d2h-del .d2h-code-linenumber,
-.d2h-diff-tbody tr.d2h-del td.d2h-code-linenumber,
-tr.d2h-del td {
-  background: #2b1717 !important;
+.d2h-diff-table .d2h-code-line-prefix {
+  color: var(--text-muted) !important;
 }
 
-/* Added lines — force EVERYTHING to one flat color */
-.d2h-ins,
-.d2h-ins *,
-tr.d2h-ins,
-tr.d2h-ins td,
-tr.d2h-ins td * {
+/* ── Added lines ── d2h-ins is on TD, not TR */
+td.d2h-ins,
+td.d2h-ins.d2h-code-linenumber,
+td.d2h-code-linenumber.d2h-ins,
+.d2h-diff-table td.d2h-ins,
+.d2h-diff-table td.d2h-ins.d2h-code-linenumber {
+  background-color: #122117 !important;
+  background-image: none !important;
+  border-right-color: #1a3a24 !important;
+}
+td.d2h-ins *,
+.d2h-diff-table td.d2h-ins * {
   background-color: #122117 !important;
   background-image: none !important;
 }
-.d2h-ins .d2h-code-line-prefix {
+td.d2h-ins .d2h-code-line-prefix {
   color: var(--green) !important;
 }
 
-/* Deleted lines — force EVERYTHING to one flat color */
-.d2h-del,
-.d2h-del *,
-tr.d2h-del,
-tr.d2h-del td,
-tr.d2h-del td * {
+/* ── Deleted lines ── d2h-del is on TD, not TR */
+td.d2h-del,
+td.d2h-del.d2h-code-linenumber,
+td.d2h-code-linenumber.d2h-del,
+.d2h-diff-table td.d2h-del,
+.d2h-diff-table td.d2h-del.d2h-code-linenumber {
+  background-color: #2b1717 !important;
+  background-image: none !important;
+  border-right-color: #3d2020 !important;
+}
+td.d2h-del *,
+.d2h-diff-table td.d2h-del * {
   background-color: #2b1717 !important;
   background-image: none !important;
 }
-.d2h-del .d2h-code-line-prefix {
+td.d2h-del .d2h-code-line-prefix {
   color: var(--red) !important;
 }
 
-/* Word-level highlight within lines */
-.d2h-ins .d2h-change,
-.d2h-ins ins {
+/* Word-level highlight within changed lines */
+td.d2h-ins .d2h-change,
+td.d2h-ins ins {
   background-color: rgba(63, 185, 80, 0.4) !important;
 }
-.d2h-del .d2h-change,
-.d2h-del del {
+td.d2h-del .d2h-change,
+td.d2h-del del {
   background-color: rgba(248, 81, 73, 0.4) !important;
 }
 
-/* Hunk headers */
-.d2h-info,
-.d2h-info *,
-tr.d2h-info td,
-tr.d2h-info td * {
-  background-color: rgba(88, 166, 255, 0.1) !important;
+/* ── Hunk headers ── d2h-info is on TD too */
+td.d2h-info,
+td.d2h-info.d2h-code-linenumber,
+.d2h-diff-table td.d2h-info {
+  background-color: #141d2b !important;
   background-image: none !important;
+  color: var(--text-muted) !important;
+  border-right-color: #1c2940 !important;
+}
+td.d2h-info * {
+  background-color: #141d2b !important;
   color: var(--text-muted) !important;
 }
 
