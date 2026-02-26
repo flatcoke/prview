@@ -30,12 +30,23 @@ type Config struct {
 func New(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 
-	// Serve static files
+	// Serve static files with SPA fallback
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	staticHandler := http.FileServer(http.FS(sub))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// If it's a known static file, serve it
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" ||
+			r.URL.Path == "/app.js" || r.URL.Path == "/style.css" {
+			staticHandler.ServeHTTP(w, r)
+			return
+		}
+		// SPA fallback: serve index.html for repo routes
+		r.URL.Path = "/"
+		staticHandler.ServeHTTP(w, r)
+	})
 
 	// Workspace mode: list repos
 	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
