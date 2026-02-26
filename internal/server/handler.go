@@ -37,14 +37,19 @@ func New(cfg Config) http.Handler {
 	}
 	staticHandler := http.FileServer(http.FS(sub))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// If it's a known static file, serve it
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" ||
-			r.URL.Path == "/app.js" || r.URL.Path == "/style.css" {
+		path := r.URL.Path
+		// Known static files
+		if path == "/" || path == "/index.html" ||
+			path == "/app.js" || path == "/style.css" {
 			staticHandler.ServeHTTP(w, r)
 			return
 		}
-		// SPA fallback: serve index.html for repo routes
-		r.URL.Path = "/"
+		// SPA fallback for /repos/* and any other routes
+		if strings.HasPrefix(path, "/repos/") || !strings.Contains(path, ".") {
+			r.URL.Path = "/"
+			staticHandler.ServeHTTP(w, r)
+			return
+		}
 		staticHandler.ServeHTTP(w, r)
 	})
 

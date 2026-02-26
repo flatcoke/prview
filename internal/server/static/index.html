@@ -24,14 +24,13 @@
       <div class="sidebar-header">Files</div>
       <ul id="file-list"></ul>
     </aside>
-    <main id="diff-container">
+    <main id="diff-container" style="display:none;">
       <div id="empty-state">
         <p>No changes detected.</p>
       </div>
     </main>
-    <!-- Repo list (workspace landing) -->
-    <div id="repo-list-container" style="display:none;">
-    </div>
+    <div id="repo-list-container" style="display:none;"></div>
+    <div id="loading" style="display:flex; flex:1; align-items:center; justify-content:center; color:#8b949e;">Loading...</div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html.min.js"></script>
   <script src="/app.js"></script>
