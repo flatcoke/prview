@@ -216,12 +216,15 @@ header {
   font-size: 12px !important;
 }
 
-.d2h-code-line-ctn, .d2h-code-side-line {
+/* Context lines — uniform background */
+.d2h-code-line-ctn,
+.d2h-code-side-line {
   background: var(--bg-primary) !important;
   color: var(--text-primary) !important;
 }
 
 .d2h-code-line-prefix {
+  background: var(--bg-primary) !important;
   color: var(--text-muted) !important;
 }
 
@@ -232,31 +235,69 @@ header {
   border-right: 1px solid var(--border) !important;
 }
 
-/* Added lines */
-.d2h-ins {
-  background: rgba(63, 185, 80, 0.15) !important;
+/* Ensure all td in diff rows get base background */
+.d2h-diff-tbody td {
+  background: var(--bg-primary) !important;
 }
-.d2h-ins .d2h-code-line-ctn {
-  background: rgba(63, 185, 80, 0.15) !important;
+.d2h-diff-tbody .d2h-code-linenumber {
+  background: var(--bg-secondary) !important;
+}
+
+/* Override linenumber background for ins/del rows to match content */
+.d2h-ins .d2h-code-linenumber,
+.d2h-diff-tbody tr.d2h-ins td.d2h-code-linenumber,
+tr.d2h-ins td {
+  background: #122117 !important;
+}
+.d2h-del .d2h-code-linenumber,
+.d2h-diff-tbody tr.d2h-del td.d2h-code-linenumber,
+tr.d2h-del td {
+  background: #2b1717 !important;
+}
+
+/* Added lines — force EVERYTHING to one flat color */
+.d2h-ins,
+.d2h-ins *,
+tr.d2h-ins,
+tr.d2h-ins td,
+tr.d2h-ins td * {
+  background-color: #122117 !important;
+  background-image: none !important;
 }
 .d2h-ins .d2h-code-line-prefix {
   color: var(--green) !important;
 }
 
-/* Deleted lines */
-.d2h-del {
-  background: rgba(248, 81, 73, 0.15) !important;
-}
-.d2h-del .d2h-code-line-ctn {
-  background: rgba(248, 81, 73, 0.15) !important;
+/* Deleted lines — force EVERYTHING to one flat color */
+.d2h-del,
+.d2h-del *,
+tr.d2h-del,
+tr.d2h-del td,
+tr.d2h-del td * {
+  background-color: #2b1717 !important;
+  background-image: none !important;
 }
 .d2h-del .d2h-code-line-prefix {
   color: var(--red) !important;
 }
 
+/* Word-level highlight within lines */
+.d2h-ins .d2h-change,
+.d2h-ins ins {
+  background-color: rgba(63, 185, 80, 0.4) !important;
+}
+.d2h-del .d2h-change,
+.d2h-del del {
+  background-color: rgba(248, 81, 73, 0.4) !important;
+}
+
 /* Hunk headers */
-.d2h-info {
-  background: rgba(88, 166, 255, 0.1) !important;
+.d2h-info,
+.d2h-info *,
+tr.d2h-info td,
+tr.d2h-info td * {
+  background-color: rgba(88, 166, 255, 0.1) !important;
+  background-image: none !important;
   color: var(--text-muted) !important;
 }
 
