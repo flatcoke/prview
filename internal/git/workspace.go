@@ -266,6 +266,52 @@ func DeleteWorktree(repoDir, worktreeName string) error {
 	return fmt.Errorf("worktree %q not found", worktreeName)
 }
 
+// DeleteAllBranches removes all non-default, non-current branches.
+// Returns lists of deleted branch names and error messages.
+func DeleteAllBranches(repoDir string) ([]string, []string) {
+	branches, err := ListBranches(repoDir)
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	current := gitBranch(repoDir)
+	defaultBr := DefaultBranch(repoDir)
+
+	var deleted, errs []string
+	for _, b := range branches {
+		if b == current || b == defaultBr || b == branchMain || b == branchMaster {
+			continue
+		}
+		if err := DeleteBranch(repoDir, b, true); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", b, err))
+		} else {
+			deleted = append(deleted, b)
+		}
+	}
+	return deleted, errs
+}
+
+// DeleteAllWorktrees removes all linked (non-main) worktrees.
+// Returns lists of deleted worktree names and error messages.
+func DeleteAllWorktrees(repoDir string) ([]string, []string) {
+	worktrees, err := GitWorktrees(repoDir)
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	var deleted, errs []string
+	for _, wt := range worktrees {
+		if wt.IsMain {
+			continue
+		}
+		out, errRm := exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", wt.Path).CombinedOutput()
+		if errRm != nil {
+			errs = append(errs, fmt.Sprintf("%s: %s", wt.Name, strings.TrimSpace(string(out))))
+		} else {
+			deleted = append(deleted, wt.Name)
+		}
+	}
+	return deleted, errs
+}
+
 // DiffInRepo runs git diff in a specific repository directory.
 func DiffInRepo(repoDir string, args []string) (*DiffResult, error) {
 	cmdArgs := append([]string{"-C", repoDir, "diff", "--unified=3", "--no-color"}, args...)

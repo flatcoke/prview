@@ -544,6 +544,8 @@
         `<td class="repo-actions"><button class="repo-menu-btn" title="Actions">⋯</button>` +
         `<div class="repo-menu">` +
         `<button class="repo-menu-item" data-action="clear" data-repo="${repo.name}">Clear changes</button>` +
+        `<button class="repo-menu-item danger" data-action="remove-worktrees" data-repo="${repo.name}">Remove all worktrees</button>` +
+        `<button class="repo-menu-item danger" data-action="remove-branches" data-repo="${repo.name}">Remove all branches</button>` +
         `<div class="repo-menu-divider"></div>` +
         `<button class="repo-menu-item danger" data-action="hide" data-repo="${repo.name}">Hide this repo</button>` +
         `</div></td>`;
@@ -577,6 +579,16 @@
           fadeOutRow(tr);
           try {
             await repoActionAndReload(`${API.clear}?repo=${encodeURIComponent(repoName)}`, "POST");
+          } catch (err) { alert("Error: " + err.message); }
+        } else if (action === "remove-worktrees") {
+          if (!confirm(`Remove ALL linked worktrees in "${repoName}"? This cannot be undone.`)) return;
+          try {
+            await repoActionAndReload(`${API.worktrees}?repo=${encodeURIComponent(repoName)}&all=true`, "DELETE");
+          } catch (err) { alert("Error: " + err.message); }
+        } else if (action === "remove-branches") {
+          if (!confirm(`Remove ALL non-default branches in "${repoName}"? This cannot be undone.`)) return;
+          try {
+            await repoActionAndReload(`${API.branches}?repo=${encodeURIComponent(repoName)}&all=true`, "DELETE");
           } catch (err) { alert("Error: " + err.message); }
         } else if (action === "hide") {
           if (!confirm(`Hide "${repoName}" from the workspace list?`)) return;

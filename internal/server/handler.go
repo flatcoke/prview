@@ -359,13 +359,9 @@ func (s *srv) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDeleteBranch handles DELETE /api/branches?repo=X&branch=Y[&force=true].
+// handleDeleteBranch handles DELETE /api/branches?repo=X&branch=Y[&force=true]
+// or DELETE /api/branches?repo=X&all=true (remove all non-default branches).
 func (s *srv) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
-	branchName := r.URL.Query().Get("branch")
-	if branchName == "" {
-		writeError(w, "branch parameter required", http.StatusBadRequest)
-		return
-	}
 	var repoDir string
 	if repoName := r.URL.Query().Get("repo"); repoName != "" {
 		dir, ok := safeRepoPath(s.cfg.WorkDir, repoName)
@@ -375,6 +371,18 @@ func (s *srv) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 		}
 		repoDir = dir
 	}
+
+	if r.URL.Query().Get("all") == "true" {
+		deleted, errs := git.DeleteAllBranches(repoDir)
+		writeJSON(w, map[string]interface{}{"deleted": deleted, "errors": errs})
+		return
+	}
+
+	branchName := r.URL.Query().Get("branch")
+	if branchName == "" {
+		writeError(w, "branch parameter required", http.StatusBadRequest)
+		return
+	}
 	force := r.URL.Query().Get("force") == "true"
 	if err := git.DeleteBranch(repoDir, branchName, force); err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
@@ -383,17 +391,29 @@ func (s *srv) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"ok": "deleted"})
 }
 
-// handleDeleteWorktree handles DELETE /api/worktrees?repo=X&worktree=Y.
+// handleDeleteWorktree handles DELETE /api/worktrees?repo=X&worktree=Y
+// or DELETE /api/worktrees?repo=X&all=true (remove all linked worktrees).
 func (s *srv) handleDeleteWorktree(w http.ResponseWriter, r *http.Request) {
 	repoName := r.URL.Query().Get("repo")
-	worktreeName := r.URL.Query().Get("worktree")
-	if repoName == "" || worktreeName == "" {
-		writeError(w, "repo and worktree parameters required", http.StatusBadRequest)
+	if repoName == "" {
+		writeError(w, "repo parameter required", http.StatusBadRequest)
 		return
 	}
 	repoDir, ok := safeRepoPath(s.cfg.WorkDir, repoName)
 	if !ok {
 		writeError(w, "invalid repo name", http.StatusBadRequest)
+		return
+	}
+
+	if r.URL.Query().Get("all") == "true" {
+		deleted, errs := git.DeleteAllWorktrees(repoDir)
+		writeJSON(w, map[string]interface{}{"deleted": deleted, "errors": errs})
+		return
+	}
+
+	worktreeName := r.URL.Query().Get("worktree")
+	if worktreeName == "" {
+		writeError(w, "worktree parameter required", http.StatusBadRequest)
 		return
 	}
 	if err := git.DeleteWorktree(repoDir, worktreeName); err != nil {
