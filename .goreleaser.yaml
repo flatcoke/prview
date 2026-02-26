@@ -32,7 +32,7 @@ archives:
 brews:
   - repository:
       owner: flatcoke
-      name: homebrew-prview
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/flatcoke/prview"
     description: "GitHub-style git diff viewer in your browser"
