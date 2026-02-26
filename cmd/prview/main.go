@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flatcoke/prview/internal/git"
 	"github.com/flatcoke/prview/internal/server"
 )
 
@@ -26,20 +27,43 @@ func main() {
 	staged := flag.Bool("staged", false, "Show staged changes")
 	all := flag.Bool("all", false, "Show staged + unstaged changes")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Printf("prview %s (%s)\n", version, commit)
+		os.Exit(0)
+	}
+
+	workDir, _ := os.Getwd()
+
+	// Detect mode: single repo vs workspace
+	isWorkspace := false
+	if !git.IsGitRepo(workDir) {
+		// Not a git repo — check if subdirectories contain repos
+		repos, err := git.DiscoverRepos(workDir)
+		if err == nil && len(repos) > 0 {
+			isWorkspace = true
+			fmt.Printf("prview: workspace mode — found %d repos\n", len(repos))
+		} else {
+			fmt.Fprintln(os.Stderr, "prview: not a git repository and no git repos found in subdirectories")
+			os.Exit(1)
+		}
+	}
+
 	cfg := server.Config{
-		Port:    *port,
-		Staged:  *staged,
-		All:     *all,
-		RefArgs: flag.Args(),
+		Port:      *port,
+		Staged:    *staged,
+		All:       *all,
+		RefArgs:   flag.Args(),
+		WorkDir:   workDir,
+		Workspace: isWorkspace,
 	}
 
 	handler := server.New(cfg)
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{Addr: addr, Handler: handler}
 
-	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
