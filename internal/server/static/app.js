@@ -106,7 +106,7 @@
 
   async function selectRepo(repoName) {
     currentRepo = repoName;
-    history.pushState({ repo: repoName }, "", `/${repoName}`);
+    history.pushState({ repo: repoName }, "", `/repos/${repoName}`);
     showDiffView();
 
     const stats = document.getElementById("stats");
@@ -259,7 +259,8 @@
     const ws = await checkWorkspace();
     if (ws) {
       // Check URL for direct repo access: /repoName
-      const path = window.location.pathname.replace(/^\//, "");
+      const match = window.location.pathname.match(/^\/repos\/(.+)$/);
+      const path = match ? match[1] : "";
       if (path && reposCache.some((r) => r.name === path)) {
         await selectRepo(path);
       }
