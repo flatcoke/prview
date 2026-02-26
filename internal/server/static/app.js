@@ -39,7 +39,7 @@
     document.querySelector(".header-right").style.display = "";
   }
 
-  // ── Workspace mode: repo list ──
+  // ── Workspace mode ──
 
   async function checkWorkspace() {
     const data = await fetchJSON("/api/repos");
@@ -73,29 +73,34 @@
       return a.name.localeCompare(b.name);
     });
 
-    const grid = document.createElement("div");
-    grid.className = "repo-grid";
+    const table = document.createElement("table");
+    table.className = "repo-table";
 
+    const thead = document.createElement("thead");
+    thead.innerHTML = `<tr>
+      <th></th>
+      <th>Repository</th>
+      <th>Branch</th>
+      <th>Status</th>
+    </tr>`;
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
     sorted.forEach((repo) => {
-      const card = document.createElement("div");
-      card.className = "repo-card" + (repo.dirty ? " repo-dirty" : "");
-      card.onclick = () => selectRepo(repo.name);
+      const tr = document.createElement("tr");
+      tr.className = repo.dirty ? "repo-dirty" : "";
+      tr.onclick = () => selectRepo(repo.name);
 
-      card.innerHTML =
-        `<div class="repo-card-header">` +
-        `<span class="repo-name">${repo.name}</span>` +
-        `<span class="repo-branch">${repo.branch || ""}</span>` +
-        `</div>` +
-        `<div class="repo-card-status">` +
-        (repo.dirty
-          ? '<span class="repo-status-dirty">● Changes</span>'
-          : '<span class="repo-status-clean">○ Clean</span>') +
-        `</div>`;
+      tr.innerHTML =
+        `<td class="repo-indicator">${repo.dirty ? '<span class="dot-dirty">●</span>' : '<span class="dot-clean">○</span>'}</td>` +
+        `<td class="repo-name">${repo.name}</td>` +
+        `<td class="repo-branch">${repo.branch || ""}</td>` +
+        `<td class="repo-status">${repo.dirty ? "Changes" : "Clean"}</td>`;
 
-      grid.appendChild(card);
+      tbody.appendChild(tr);
     });
-
-    container.appendChild(grid);
+    table.appendChild(tbody);
+    container.appendChild(table);
   }
 
   async function selectRepo(repoName) {
@@ -115,7 +120,7 @@
     }
   }
 
-  // ── Single repo mode ──
+  // ── Diff view ──
 
   function renderStats(data) {
     const el = document.getElementById("stats");
@@ -151,12 +156,8 @@
         `<span class="status-badge ${badgeClass}">${badgeText}</span>` +
         `<span class="filename" title="${name}">${name}</span>` +
         `<span class="file-stats">` +
-        (file.additions
-          ? `<span class="add">+${file.additions}</span> `
-          : "") +
-        (file.deletions
-          ? `<span class="del">-${file.deletions}</span>`
-          : "") +
+        (file.additions ? `<span class="add">+${file.additions}</span> ` : "") +
+        (file.deletions ? `<span class="del">-${file.deletions}</span>` : "") +
         `</span>`;
 
       ul.appendChild(li);
@@ -198,13 +199,11 @@
       const btn = document.createElement("button");
       btn.className = "file-collapse-btn";
       btn.innerHTML = "▼";
-      btn.setAttribute("data-file-idx", idx);
       btn.onclick = (e) => {
         e.stopPropagation();
         toggleFile(btn);
       };
       header.prepend(btn);
-      header.setAttribute("data-file-idx", idx);
       header.id = `file-header-${idx}`;
     });
   }
@@ -226,40 +225,29 @@
   }
 
   function setupViewToggle() {
-    const btnUnified = document.getElementById("btn-unified");
-    const btnSplit = document.getElementById("btn-split");
-
-    btnUnified.onclick = () => {
+    document.getElementById("btn-unified").onclick = () => {
       currentView = "line-by-line";
-      btnUnified.classList.add("active");
-      btnSplit.classList.remove("active");
+      document.getElementById("btn-unified").classList.add("active");
+      document.getElementById("btn-split").classList.remove("active");
       if (diffData) renderDiff(diffData);
     };
-
-    btnSplit.onclick = () => {
+    document.getElementById("btn-split").onclick = () => {
       currentView = "side-by-side";
-      btnSplit.classList.add("active");
-      btnUnified.classList.remove("active");
+      document.getElementById("btn-split").classList.add("active");
+      document.getElementById("btn-unified").classList.remove("active");
       if (diffData) renderDiff(diffData);
-    };
-  }
-
-  function setupBackButton() {
-    document.getElementById("btn-back").onclick = () => {
-      if (reposCache) {
-        renderRepoListPage(reposCache);
-      }
     };
   }
 
   async function init() {
     setupViewToggle();
-    setupBackButton();
+    document.getElementById("btn-back").onclick = () => {
+      if (reposCache) renderRepoListPage(reposCache);
+    };
 
     const ws = await checkWorkspace();
     if (ws) return;
 
-    // Single repo mode
     showDiffView();
     diffData = await fetchJSON("/api/diff");
     if (diffData) {
