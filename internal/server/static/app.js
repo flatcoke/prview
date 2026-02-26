@@ -5,6 +5,7 @@
   let diffData = null;
   let isWorkspace = false;
   let currentRepo = null;
+  let reposCache = null;
 
   async function fetchJSON(url) {
     try {
@@ -17,141 +18,100 @@
     }
   }
 
-  // ── Workspace mode ──
+  // ── Layout switching ──
+
+  function showRepoList() {
+    document.getElementById("sidebar").style.display = "none";
+    document.getElementById("diff-container").style.display = "none";
+    document.getElementById("repo-list-container").style.display = "flex";
+    document.getElementById("btn-back").style.display = "none";
+    document.querySelector(".header-right").style.display = "none";
+    currentRepo = null;
+  }
+
+  function showDiffView() {
+    document.getElementById("sidebar").style.display = "";
+    document.getElementById("diff-container").style.display = "";
+    document.getElementById("repo-list-container").style.display = "none";
+    if (isWorkspace) {
+      document.getElementById("btn-back").style.display = "";
+    }
+    document.querySelector(".header-right").style.display = "";
+  }
+
+  // ── Workspace mode: repo list ──
 
   async function checkWorkspace() {
     const data = await fetchJSON("/api/repos");
     if (!data) return false;
     if (data.workspace && data.repos && data.repos.length > 0) {
       isWorkspace = true;
-      renderRepoList(data.repos);
+      reposCache = data.repos;
+      renderRepoListPage(data.repos);
       return true;
     }
     return false;
   }
 
-  function renderRepoList(repos) {
-    const sidebar = document.getElementById("sidebar");
-    const sidebarHeader = sidebar.querySelector(".sidebar-header");
-    sidebarHeader.textContent = "Repositories";
+  function renderRepoListPage(repos) {
+    showRepoList();
 
-    const ul = document.getElementById("file-list");
-    ul.innerHTML = "";
+    const container = document.getElementById("repo-list-container");
+    container.innerHTML = "";
 
     const stats = document.getElementById("stats");
-    stats.innerHTML = `${repos.length} repo${repos.length !== 1 ? "s" : ""} found`;
+    const dirtyCount = repos.filter((r) => r.dirty).length;
+    stats.innerHTML = `${repos.length} repositories`;
+    if (dirtyCount > 0) {
+      stats.innerHTML += ` &nbsp;<span class="add">${dirtyCount} with changes</span>`;
+    }
 
-    const container = document.getElementById("diff-container");
-    const empty = document.getElementById("empty-state");
-    empty.querySelector("p").textContent = "Select a repository to view changes.";
-    container.innerHTML = "";
-    container.appendChild(empty);
-    empty.style.display = "flex";
-
-    repos.forEach((repo) => {
-      const li = document.createElement("li");
-      li.onclick = () => selectRepo(repo.name, repos);
-
-      const dirtyDot = repo.dirty
-        ? '<span style="color: var(--green); margin-right: 6px;">●</span>'
-        : '<span style="color: var(--text-muted); margin-right: 6px;">○</span>';
-
-      li.innerHTML =
-        dirtyDot +
-        `<span class="filename" title="${repo.name}">${repo.name}</span>` +
-        `<span class="file-stats" style="color: var(--text-muted); font-size: 11px;">${repo.branch || ""}</span>`;
-
-      ul.appendChild(li);
+    // Sort: dirty repos first
+    const sorted = [...repos].sort((a, b) => {
+      if (a.dirty && !b.dirty) return -1;
+      if (!a.dirty && b.dirty) return 1;
+      return a.name.localeCompare(b.name);
     });
+
+    const grid = document.createElement("div");
+    grid.className = "repo-grid";
+
+    sorted.forEach((repo) => {
+      const card = document.createElement("div");
+      card.className = "repo-card" + (repo.dirty ? " repo-dirty" : "");
+      card.onclick = () => selectRepo(repo.name);
+
+      card.innerHTML =
+        `<div class="repo-card-header">` +
+        `<span class="repo-name">${repo.name}</span>` +
+        `<span class="repo-branch">${repo.branch || ""}</span>` +
+        `</div>` +
+        `<div class="repo-card-status">` +
+        (repo.dirty
+          ? '<span class="repo-status-dirty">● Changes</span>'
+          : '<span class="repo-status-clean">○ Clean</span>') +
+        `</div>`;
+
+      grid.appendChild(card);
+    });
+
+    container.appendChild(grid);
   }
 
-  async function selectRepo(repoName, repos) {
+  async function selectRepo(repoName) {
     currentRepo = repoName;
+    showDiffView();
 
-    // Highlight selected repo in sidebar
-    const items = document.querySelectorAll("#file-list li");
-    items.forEach((li) => {
-      li.style.background =
-        li.querySelector(".filename").textContent === repoName
-          ? "var(--bg-tertiary)"
-          : "";
-    });
+    const stats = document.getElementById("stats");
+    stats.innerHTML = `Loading ${repoName}...`;
 
-    // Fetch diff for this repo
     const url = `/api/diff?repo=${encodeURIComponent(repoName)}`;
     diffData = await fetchJSON(url);
 
     if (diffData) {
       renderStats(diffData);
+      renderFileList(diffData);
       renderDiff(diffData);
-
-      // Show file list below repos — rebuild sidebar with repo selector + files
-      renderWorkspaceSidebar(repos, repoName, diffData);
-    }
-  }
-
-  function renderWorkspaceSidebar(repos, activeRepo, data) {
-    const ul = document.getElementById("file-list");
-    ul.innerHTML = "";
-
-    // Repo section
-    const repoHeader = document.createElement("li");
-    repoHeader.style.cssText =
-      "padding: 8px 16px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: default; pointer-events: none;";
-    repoHeader.textContent = "Repositories";
-    ul.appendChild(repoHeader);
-
-    repos.forEach((repo) => {
-      const li = document.createElement("li");
-      const isActive = repo.name === activeRepo;
-      if (isActive) li.style.background = "var(--bg-tertiary)";
-      li.onclick = () => selectRepo(repo.name, repos);
-
-      const dirtyDot = repo.dirty
-        ? '<span style="color: var(--green); margin-right: 6px;">●</span>'
-        : '<span style="color: var(--text-muted); margin-right: 6px;">○</span>';
-
-      li.innerHTML =
-        dirtyDot +
-        `<span class="filename" title="${repo.name}">${repo.name}</span>` +
-        `<span class="file-stats" style="color: var(--text-muted); font-size: 11px;">${repo.branch || ""}</span>`;
-
-      ul.appendChild(li);
-    });
-
-    // Files section (if active repo has files)
-    if (data && data.files && data.files.length > 0) {
-      const fileHeader = document.createElement("li");
-      fileHeader.style.cssText =
-        "padding: 8px 16px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: default; pointer-events: none; border-top: 1px solid var(--border); margin-top: 4px;";
-      fileHeader.textContent = `Files — ${activeRepo}`;
-      ul.appendChild(fileHeader);
-
-      data.files.forEach((file, idx) => {
-        const li = document.createElement("li");
-        li.onclick = () => scrollToFile(idx);
-        li.style.paddingLeft = "24px";
-
-        const name =
-          file.status === "renamed"
-            ? `${file.oldName} → ${file.newName}`
-            : file.status === "deleted"
-              ? file.oldName
-              : file.newName;
-
-        const badgeClass = `status-${file.status}`;
-        const badgeText = file.status.charAt(0).toUpperCase();
-
-        li.innerHTML =
-          `<span class="status-badge ${badgeClass}">${badgeText}</span>` +
-          `<span class="filename" title="${name}">${name}</span>` +
-          `<span class="file-stats">` +
-          (file.additions ? `<span class="add">+${file.additions}</span> ` : "") +
-          (file.deletions ? `<span class="del">-${file.deletions}</span>` : "") +
-          `</span>`;
-
-        ul.appendChild(li);
-      });
     }
   }
 
@@ -191,8 +151,12 @@
         `<span class="status-badge ${badgeClass}">${badgeText}</span>` +
         `<span class="filename" title="${name}">${name}</span>` +
         `<span class="file-stats">` +
-        (file.additions ? `<span class="add">+${file.additions}</span> ` : "") +
-        (file.deletions ? `<span class="del">-${file.deletions}</span>` : "") +
+        (file.additions
+          ? `<span class="add">+${file.additions}</span> `
+          : "") +
+        (file.deletions
+          ? `<span class="del">-${file.deletions}</span>`
+          : "") +
         `</span>`;
 
       ul.appendChild(li);
@@ -229,7 +193,6 @@
     const ui = new Diff2HtmlUI(targetEl, data.rawDiff, config);
     ui.draw();
 
-    // Add collapse buttons to file headers
     const headers = container.querySelectorAll(".d2h-file-header");
     headers.forEach((header, idx) => {
       const btn = document.createElement("button");
@@ -238,7 +201,7 @@
       btn.setAttribute("data-file-idx", idx);
       btn.onclick = (e) => {
         e.stopPropagation();
-        toggleFile(btn, idx);
+        toggleFile(btn);
       };
       header.prepend(btn);
       header.setAttribute("data-file-idx", idx);
@@ -246,11 +209,10 @@
     });
   }
 
-  function toggleFile(btn, _idx) {
+  function toggleFile(btn) {
     const wrapper = btn.closest(".d2h-file-wrapper");
     const diff = wrapper ? wrapper.querySelector(".d2h-file-diff") : null;
     if (!diff) return;
-
     const collapsed = diff.style.display === "none";
     diff.style.display = collapsed ? "" : "none";
     btn.classList.toggle("collapsed", !collapsed);
@@ -282,14 +244,23 @@
     };
   }
 
+  function setupBackButton() {
+    document.getElementById("btn-back").onclick = () => {
+      if (reposCache) {
+        renderRepoListPage(reposCache);
+      }
+    };
+  }
+
   async function init() {
     setupViewToggle();
+    setupBackButton();
 
-    // Check if workspace mode
     const ws = await checkWorkspace();
-    if (ws) return; // Workspace mode — wait for repo selection
+    if (ws) return;
 
     // Single repo mode
+    showDiffView();
     diffData = await fetchJSON("/api/diff");
     if (diffData) {
       renderStats(diffData);

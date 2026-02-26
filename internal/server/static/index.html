@@ -10,6 +10,7 @@
 <body>
   <header id="header">
     <div class="header-left">
+      <button id="btn-back" class="back-btn" style="display:none;" title="Back to repos">←</button>
       <h1>prview</h1>
       <span id="stats" class="stats"></span>
     </div>
@@ -19,7 +20,7 @@
     </div>
   </header>
   <div id="container">
-    <aside id="sidebar">
+    <aside id="sidebar" style="display:none;">
       <div class="sidebar-header">Files</div>
       <ul id="file-list"></ul>
     </aside>
@@ -28,6 +29,9 @@
         <p>No changes detected.</p>
       </div>
     </main>
+    <!-- Repo list (workspace landing) -->
+    <div id="repo-list-container" style="display:none;">
+    </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
   <script src="/app.js"></script>
