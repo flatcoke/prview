@@ -421,7 +421,8 @@
     // Rebuild menu.
     dom.wtMenu.innerHTML = "";
     const mainWts   = worktrees.filter((wt) => wt.isMain);
-    const linkedWts = worktrees.filter((wt) => !wt.isMain);
+    const linkedWts = worktrees.filter((wt) => !wt.isMain)
+      .sort((a, b) => (b.lastCommit || 0) - (a.lastCommit || 0));
 
     const mainHeader = document.createElement("div");
     mainHeader.className   = "wt-menu-section";
