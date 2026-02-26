@@ -343,7 +343,7 @@
         renderWorktreeDropdown(worktrees, currentRepo, currentWorktree);
       } else {
         currentWorktree = null;
-        hideWorktreeDropdown();
+        showCurrentBranchOnly(currentBranch);
       }
       updateDeleteWorktreeVisibility();
       updateURL(true);
@@ -439,6 +439,10 @@
     }
 
     dom.worktreeControl.style.display = "";
+    dom.wtBtn.disabled = false;
+    dom.wtBtn.style.cursor = "pointer";
+    const chevron = dom.wtBtn.querySelector(".wt-chevron");
+    if (chevron) chevron.style.display = "";
     updateDeleteWorktreeVisibility();
   }
 
@@ -480,6 +484,19 @@
     if (dom.wtMenu) dom.wtMenu.innerHTML = "";
     currentWorktrees      = [];
     currentWorktreeIsMain = false;
+  }
+
+  /** showCurrentBranchOnly displays the HEAD label with the current branch and an empty dropdown. */
+  function showCurrentBranchOnly(branchName) {
+    dom.worktreeControl.style.display = "";
+    dom.wtBtnLabel.textContent = branchName || "—";
+    dom.wtBtn.disabled = false;
+    dom.wtBtn.style.cursor = "pointer";
+    if (dom.wtMenu) dom.wtMenu.innerHTML = "";
+    const chevron = dom.wtBtn.querySelector(".wt-chevron");
+    if (chevron) chevron.style.display = "";
+    currentWorktrees      = [];
+    currentWorktreeIsMain = true;
   }
 
   // ── Workspace / repo list ──
@@ -692,7 +709,8 @@
       currentWorktree = activeWt;
       renderWorktreeDropdown(worktrees, repoName, activeWt);
     } else {
-      hideWorktreeDropdown();
+      currentWorktree = null;
+      showCurrentBranchOnly(currentBranch);
     }
 
     // Push history with fully resolved state.
