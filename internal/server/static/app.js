@@ -27,7 +27,10 @@
     baseSelect:           "base-select",
     btnDeleteBranch:      "btn-delete-branch",
     worktreeControl:      "worktree-control",
-    wtSelect:             "wt-select",
+    wtDropdown:           "wt-dropdown",
+    wtBtn:                "wt-btn",
+    wtBtnLabel:           "wt-btn-label",
+    wtMenu:               "wt-menu",
     btnDeleteWorktree:    "btn-delete-worktree",
     stats:                "stats",
     headerRightWorkspace: "header-right-workspace",
@@ -51,15 +54,17 @@
 
   // ── State ──
 
-  let currentView     = "side-by-side";
-  let diffData        = null;
-  let isWorkspace     = false;
-  let currentRepo     = null;
-  let currentWorktree = null;
-  let currentBranch   = null;
-  let reposCache      = null;
-  let currentBase     = null;
-  let currentMode     = "all"; // "branch" | "all" | "uncommitted"
+  let currentView           = "side-by-side";
+  let diffData              = null;
+  let isWorkspace           = false;
+  let currentRepo           = null;
+  let currentWorktree       = null;
+  let currentBranch         = null;
+  let reposCache            = null;
+  let currentBase           = null;
+  let currentMode           = "all"; // "branch" | "all" | "uncommitted"
+  let currentWorktrees      = []; // cached for dropdown re-render
+  let currentWorktreeIsMain = false;
 
   /** Active WebSocket manager — holds the current live connection. */
   let wsManager = null;
@@ -286,8 +291,7 @@
 
   function updateDeleteWorktreeVisibility() {
     if (!dom.btnDeleteWorktree) return;
-    const options = dom.wtSelect ? dom.wtSelect.options : [];
-    dom.btnDeleteWorktree.disabled = options.length <= 1 || dom.wtSelect.selectedIndex === 0;
+    dom.btnDeleteWorktree.disabled = currentWorktreeIsMain;
   }
 
   async function deleteBranch() {
@@ -319,7 +323,7 @@
   }
 
   async function deleteWorktree() {
-    const worktree = dom.wtSelect ? dom.wtSelect.value : "";
+    const worktree = currentWorktree;
     if (!worktree || !currentRepo) return;
     if (!confirm(`Remove worktree "${worktree}"? The working directory will be deleted.`)) return;
 
@@ -332,14 +336,14 @@
         return;
       }
       // Refresh worktrees — switch to main worktree.
-      const wtData   = await fetchJSON(`${API.worktrees}?repo=${encodeURIComponent(currentRepo)}`);
+      const wtData    = await fetchJSON(`${API.worktrees}?repo=${encodeURIComponent(currentRepo)}`);
       const worktrees = wtData.worktrees || [];
       if (worktrees.length > 1) {
         currentWorktree = worktrees[0].name;
-        renderWorktreeSelect(worktrees, currentRepo, currentWorktree);
+        renderWorktreeDropdown(worktrees, currentRepo, currentWorktree);
       } else {
         currentWorktree = null;
-        hideWorktreeSelect();
+        hideWorktreeDropdown();
       }
       updateDeleteWorktreeVisibility();
       updateURL(true);
@@ -383,7 +387,7 @@
     dom.headerTitle.textContent = "prview";
     currentRepo     = null;
     currentWorktree = null;
-    hideWorktreeSelect();
+    hideWorktreeDropdown();
     hideBranchControl();
   }
 
@@ -406,26 +410,75 @@
 
   // ── Worktree dropdown ──
 
-  function renderWorktreeSelect(worktrees, repoName, activeWorktreeName) {
-    dom.wtSelect.innerHTML = "";
-    worktrees.forEach((wt) => {
-      const opt = document.createElement("option");
-      opt.value       = wt.name;
-      opt.textContent = wt.branch || wt.name;
-      opt.selected    = wt.name === activeWorktreeName;
-      dom.wtSelect.appendChild(opt);
-    });
-    dom.wtSelect.onchange = () => {
-      selectWorktree(repoName, dom.wtSelect.value);
-      updateDeleteWorktreeVisibility();
-    };
+  function renderWorktreeDropdown(worktrees, repoName, activeWorktreeName) {
+    currentWorktrees = worktrees;
+    const activeWt   = worktrees.find((wt) => wt.name === activeWorktreeName) || worktrees[0];
+
+    // Update button label.
+    if (dom.wtBtnLabel) dom.wtBtnLabel.textContent = activeWt ? (activeWt.branch || activeWt.name) : "";
+    currentWorktreeIsMain = activeWt ? !!activeWt.isMain : false;
+
+    // Rebuild menu.
+    dom.wtMenu.innerHTML = "";
+    const mainWts   = worktrees.filter((wt) => wt.isMain);
+    const linkedWts = worktrees.filter((wt) => !wt.isMain);
+
+    const mainHeader = document.createElement("div");
+    mainHeader.className   = "wt-menu-section";
+    mainHeader.textContent = "Main Worktree";
+    dom.wtMenu.appendChild(mainHeader);
+    mainWts.forEach((wt) => dom.wtMenu.appendChild(createWtItem(wt, repoName, activeWorktreeName)));
+
+    if (linkedWts.length > 0) {
+      const linkedHeader = document.createElement("div");
+      linkedHeader.className   = "wt-menu-section";
+      linkedHeader.textContent = "Linked Worktrees";
+      dom.wtMenu.appendChild(linkedHeader);
+      linkedWts.forEach((wt) => dom.wtMenu.appendChild(createWtItem(wt, repoName, activeWorktreeName)));
+    }
+
     dom.worktreeControl.style.display = "";
     updateDeleteWorktreeVisibility();
   }
 
-  function hideWorktreeSelect() {
+  function createWtItem(wt, repoName, activeWorktreeName) {
+    const isActive = wt.name === activeWorktreeName;
+    const item     = document.createElement("div");
+    item.className = "wt-menu-item" + (isActive ? " active" : "");
+
+    const check = document.createElement("span");
+    check.className   = "wt-item-check";
+    check.textContent = isActive ? "✓" : "";
+
+    const icon = document.createElement("span");
+    icon.className   = "wt-item-icon";
+    icon.textContent = wt.isMain ? "" : "📁";
+
+    const name = document.createElement("span");
+    name.className   = "wt-item-name";
+    name.textContent = wt.name;
+
+    const branch = document.createElement("span");
+    branch.className   = "wt-item-branch";
+    branch.textContent = wt.branch || "";
+
+    item.appendChild(check);
+    item.appendChild(icon);
+    item.appendChild(name);
+    item.appendChild(branch);
+
+    item.addEventListener("click", () => {
+      dom.wtMenu.classList.remove("open");
+      selectWorktree(repoName, wt.name);
+    });
+    return item;
+  }
+
+  function hideWorktreeDropdown() {
     dom.worktreeControl.style.display = "none";
-    dom.wtSelect.innerHTML = "";
+    if (dom.wtMenu) dom.wtMenu.innerHTML = "";
+    currentWorktrees      = [];
+    currentWorktreeIsMain = false;
   }
 
   // ── Workspace / repo list ──
@@ -624,9 +677,9 @@
     if (worktrees.length > 1) {
       const activeWt  = initialWorktree || worktrees[0].name;
       currentWorktree = activeWt;
-      renderWorktreeSelect(worktrees, repoName, activeWt);
+      renderWorktreeDropdown(worktrees, repoName, activeWt);
     } else {
-      hideWorktreeSelect();
+      hideWorktreeDropdown();
     }
 
     // Push history with fully resolved state.
@@ -641,8 +694,10 @@
   }
 
   async function selectWorktree(repoName, worktreeName) {
-    currentWorktree         = worktreeName;
-    dom.wtSelect.value      = worktreeName;
+    currentWorktree = worktreeName;
+    if (currentWorktrees.length > 0) {
+      renderWorktreeDropdown(currentWorktrees, repoName, worktreeName);
+    }
 
     history.pushState(
       { repo: repoName, worktree: worktreeName, base: currentBase, mode: currentMode },
@@ -780,7 +835,7 @@
   // ── Close all open menus ──
 
   function closeAllMenus() {
-    document.querySelectorAll(".repo-menu.open, .settings-menu.open").forEach((m) => m.classList.remove("open"));
+    document.querySelectorAll(".repo-menu.open, .settings-menu.open, .wt-menu.open").forEach((m) => m.classList.remove("open"));
   }
   document.addEventListener("click", closeAllMenus);
 
@@ -791,8 +846,15 @@
 
     setupViewToggle();
     setupModeToggle();
-    dom.btnDeleteBranch.onclick  = deleteBranch;
+    dom.btnDeleteBranch.onclick   = deleteBranch;
     dom.btnDeleteWorktree.onclick = deleteWorktree;
+
+    // Worktree custom dropdown toggle.
+    dom.wtBtn.onclick = (e) => {
+      e.stopPropagation();
+      closeAllMenus();
+      dom.wtMenu.classList.toggle("open");
+    };
 
     // Settings dropdown toggle.
     dom.btnSettings.onclick = (e) => {

@@ -21,6 +21,7 @@ type Worktree struct {
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
 	Head   string `json:"head"`
+	IsMain bool   `json:"isMain"`
 }
 
 // GitWorktrees returns the list of worktrees for a git repository.
@@ -54,6 +55,7 @@ func parseWorktrees(raw string) []Worktree {
 		}
 		// Name is always the last path segment (directory name).
 		wt.Name = filepath.Base(wt.Path)
+		wt.IsMain = len(worktrees) == 0 // first entry in porcelain output is always the main worktree
 		worktrees = append(worktrees, wt)
 	}
 	return worktrees
