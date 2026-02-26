@@ -35,7 +35,7 @@ func GitWorktrees(repoDir string) ([]Worktree, error) {
 func parseWorktrees(raw string) []Worktree {
 	var worktrees []Worktree
 	blocks := strings.Split(strings.TrimSpace(raw), "\n\n")
-	for i, block := range blocks {
+	for _, block := range blocks {
 		block = strings.TrimSpace(block)
 		if block == "" {
 			continue
@@ -52,17 +52,8 @@ func parseWorktrees(raw string) []Worktree {
 				wt.Branch = strings.TrimPrefix(branch, "refs/heads/")
 			}
 		}
-		if i == 0 {
-			// Primary worktree: name derived from branch name.
-			if wt.Branch != "" {
-				wt.Name = wt.Branch
-			} else {
-				wt.Name = branchMain
-			}
-		} else {
-			// Linked worktrees: name is the last path segment.
-			wt.Name = filepath.Base(wt.Path)
-		}
+		// Name is always the last path segment (directory name).
+		wt.Name = filepath.Base(wt.Path)
 		worktrees = append(worktrees, wt)
 	}
 	return worktrees
