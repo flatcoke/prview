@@ -146,6 +146,7 @@ header {
 #base-select {
   appearance: none;
   -webkit-appearance: none;
+  min-width: 120px;
   max-width: 160px;
   padding: 3px 26px 3px 10px;
   font-size: 12px;
@@ -298,6 +299,7 @@ header {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 120px;
   max-width: 200px;
   padding: 3px 10px;
   font-size: 12px;
